@@ -28,11 +28,12 @@ for (const marker of [':focus-visible', '@media (pointer: coarse)', '@media (max
 }
 const index = await readFile('index.html', 'utf8')
 if (!index.includes('viewport-fit=cover')) throw new Error('safe-area viewport 설정 누락')
-const [friends, invites] = await Promise.all([
+const [friends, invites, matchmaking] = await Promise.all([
   readFile('src/lib/friends.ts', 'utf8'),
   readFile('src/lib/invites.ts', 'utf8'),
+  readFile('src/lib/matchmaking.ts', 'utf8'),
 ])
-if (!friends.includes("status === 'SUBSCRIBED') onChange()") || !invites.includes("status === 'SUBSCRIBED') onChange()")) {
+if (![friends, invites, matchmaking].every(source => source.includes("status === 'SUBSCRIBED') onChange()"))) {
   throw new Error('Realtime 초기 조회와 구독 사이의 상태 공백을 복구하지 않습니다.')
 }
 

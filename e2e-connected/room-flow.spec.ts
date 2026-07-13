@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
-import { accounts, connectedEnvironment } from './fixture'
+import { accounts, clearConnectedSessions, connectedEnvironment } from './fixture'
+
+test.afterEach(async () => { await clearConnectedSessions() })
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/auth')

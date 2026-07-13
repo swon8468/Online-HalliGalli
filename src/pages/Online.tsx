@@ -55,14 +55,20 @@ export default function Online() {
 
   useEffect(() => {
     if (status.status !== 'waiting') return
-    const pulse = async () => {
-      try { applyStatus(await heartbeatMatchmaking()) }
-      catch (caught) { setError(matchingError(caught)) }
+    let active = true
+    let pulsePromise: Promise<void> | null = null
+    const pulse = () => {
+      if (pulsePromise) return pulsePromise
+      pulsePromise = heartbeatMatchmaking()
+        .then(next => { if (active) applyStatus(next) })
+        .catch(caught => { if (active) setError(matchingError(caught)) })
+        .finally(() => { pulsePromise = null })
+      return pulsePromise
     }
     const timer = window.setInterval(() => void pulse(), 10_000)
     const reconnect = () => void pulse()
     window.addEventListener('online', reconnect)
-    return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect) }
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('online', reconnect) }
   }, [applyStatus, status.status])
 
   const start = async () => {

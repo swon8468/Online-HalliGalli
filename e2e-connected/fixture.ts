@@ -30,6 +30,18 @@ export async function connectedEnvironment() {
   return { url, anon, password, admin: createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } }) }
 }
 
+export async function clearConnectedSessions() {
+  const { admin } = await connectedEnvironment()
+  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (listed.error) throw listed.error
+  const ids = listed.data.users.filter(user => accounts.some(account => account.email === user.email)).map(user => user.id)
+  if (!ids.length) return
+  const queues = await admin.from('matchmaking_queue').delete().in('user_id', ids)
+  if (queues.error) throw queues.error
+  const rooms = await admin.from('rooms').delete().in('host_id', ids)
+  if (rooms.error) throw rooms.error
+}
+
 async function deleteTestUser(admin: Awaited<ReturnType<typeof connectedEnvironment>>['admin'], userId: string) {
   let lastError: unknown
   const maxAttempts = 7

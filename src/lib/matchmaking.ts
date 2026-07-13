@@ -52,7 +52,11 @@ export function subscribeToMatchmaking(userId: string, onChange: () => void) {
     .on('postgres_changes', {
       event: '*', schema: 'public', table: 'matchmaking_queue', filter: `user_id=eq.${userId}`,
     }, onChange)
-    .subscribe()
+    .subscribe(status => {
+      // Reconcile a match created between the initial status request and the
+      // completed Realtime subscription instead of waiting for a heartbeat.
+      if (status === 'SUBSCRIBED') onChange()
+    })
   return () => { void supabase?.removeChannel(channel) }
 }
 
