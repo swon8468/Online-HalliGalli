@@ -30,6 +30,8 @@
     "test-fixtures:preview": "node scripts/test-fixtures.mjs preview",
     "test-fixtures:cleanup": "node scripts/test-fixtures.mjs cleanup",
     "audit-card-assets": "node scripts/audit-card-assets.mjs preview",
+    "audit-auth:develop": "node scripts/audit-supabase-auth.mjs development",
+    "audit-auth:production": "node scripts/audit-supabase-auth.mjs production",
     "cleanup-test-card-assets": "node scripts/audit-card-assets.mjs cleanup-test-assets",
     "test-release-load": "node scripts/test-release-load.mjs",
     "test-account": "node scripts/test-account.mjs",

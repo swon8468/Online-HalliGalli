@@ -67,6 +67,8 @@ npm run test-fixtures:preview
 
 SMTP 설정값은 코드나 `.env.*`가 아니라 각 Supabase 프로젝트의 Authentication SMTP 설정에 입력한다.
 
+비밀값을 출력하지 않는 설정 감사는 `npm run audit-auth:develop` 또는 `npm run audit-auth:production`으로 실행한다. Site URL, redirect allowlist, 서버 최소 비밀번호, HIBP, SMTP, 전화 Provider와 클라이언트 플래그 일치 여부를 확인한다.
+
 - SMTP host, port, user, password
 - From 주소와 sender name
 - 인증 전용 발신 서브도메인의 SPF, DKIM, DMARC
