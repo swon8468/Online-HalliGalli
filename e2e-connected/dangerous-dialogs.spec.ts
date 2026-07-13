@@ -20,6 +20,14 @@ test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다
   await page.getByRole('button', { name: '친구 태그 복사' }).click()
   await expect(page.getByRole('alert')).toContainText('친구 태그를 복사하지 못했어요.')
 
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, 'PushManager')
+  })
+  await page.goto('/friends')
+  const unsupportedPush = page.getByRole('button', { name: '이 브라우저는 알림 미지원' })
+  await expect(unsupportedPush).toBeVisible()
+  await expect(unsupportedPush).toBeDisabled()
+
   await page.goto('/spaces')
   await page.getByRole('button', { name: '스페이스 생성', exact: true }).click()
   const createSpace = page.getByRole('dialog', { name: '스페이스 생성' })

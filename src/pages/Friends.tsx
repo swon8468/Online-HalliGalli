@@ -22,6 +22,7 @@ import { getGameInviteContext, inviteErrorMessage, sendGameInvite, type GameInvi
 import { disablePushNotifications, enablePushNotifications, getPushNotificationStatus } from '../lib/push'
 
 const EMPTY_OVERVIEW: FriendOverview = { friends: [], received: [], sent: [], blocked: [] }
+type PushState = 'loading' | 'unsupported' | 'disabled' | 'enabled'
 
 function avatarClass(seed: string) {
   const value = [...seed].reduce((sum, character) => sum + character.charCodeAt(0), 0)
@@ -60,7 +61,8 @@ export default function Friends() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [inviteContext, setInviteContext] = useState<GameInviteContext>({ available: false })
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null)
+  const [pushState, setPushState] = useState<PushState>('loading')
+  const [pushBusy, setPushBusy] = useState(false)
 
   const loadOverview = useCallback(async () => {
     try {
@@ -77,7 +79,7 @@ export default function Friends() {
     if (!user) return
     void loadOverview()
     void getGameInviteContext().then(setInviteContext).catch(() => setInviteContext({ available: false }))
-    void getPushNotificationStatus().then(status => setPushEnabled(status === 'enabled')).catch(() => setPushEnabled(false))
+    void getPushNotificationStatus().then(setPushState).catch(() => setPushState('disabled'))
     const unsubscribeChanges = subscribeToFriendChanges(user.id, () => void loadOverview())
     const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers)
     return () => {
@@ -131,12 +133,14 @@ export default function Friends() {
   const requestCount = overview.received.length + overview.sent.length
   const onlineFriendCount = overview.friends.filter(friend => onlineUsers.has(friend.userId)).length
   const togglePush = async () => {
-    if (!user) return
+    if (!user || pushBusy || pushState === 'loading' || pushState === 'unsupported') return
+    setPushBusy(true)
     setError(''); setMessage('')
     try {
-      if (pushEnabled) { await disablePushNotifications(); setPushEnabled(false); setMessage('초대 알림을 껐어요.') }
-      else { await enablePushNotifications(); setPushEnabled(true); setMessage('초대 알림을 켰어요.') }
+      if (pushState === 'enabled') { await disablePushNotifications(); setPushState('disabled'); setMessage('초대 알림을 껐어요.') }
+      else { await enablePushNotifications(); setPushState('enabled'); setMessage('초대 알림을 켰어요.') }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '알림 설정을 변경하지 못했어요.') }
+    finally { setPushBusy(false) }
   }
 
   const inviteFriend = async (friend: FriendProfile) => {
@@ -161,8 +165,8 @@ export default function Friends() {
           <input id="friend-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="닉네임 또는 태그 검색" autoComplete="off" />
           <button type="submit" aria-label="친구 검색" disabled={searching}>{searching ? <LoaderCircle className="is-spinning" /> : <UserPlus />}</button>
         </form>
-        <button className={`push-enable ${pushEnabled ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushEnabled === null}>
-          <BellRing /> {pushEnabled === null ? '알림 확인 중' : pushEnabled ? '초대 알림 끄기' : '초대 알림 켜기'}
+        <button className={`push-enable ${pushState === 'enabled' ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushBusy || pushState === 'loading' || pushState === 'unsupported'}>
+          <BellRing /> {pushBusy ? '알림 변경 중' : pushState === 'loading' ? '알림 확인 중' : pushState === 'unsupported' ? '이 브라우저는 알림 미지원' : pushState === 'enabled' ? '초대 알림 끄기' : '초대 알림 켜기'}
         </button>
       </div>
 
