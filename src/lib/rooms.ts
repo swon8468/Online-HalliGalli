@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { createUuid } from './id'
 import { cardAssetUrl } from './cards'
 
 export interface RoomInfo {
@@ -311,7 +312,7 @@ export async function loadGameView(gameId: string): Promise<GameView> {
 
 export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: createUuid() })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId }))
   if (error) throw error
   return data as GameSnapshot
@@ -319,14 +320,14 @@ export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
 
 export async function ringGameBell(gameId: string) {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: createUuid() })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('attempt_ring', { p_game_id: gameId }))
   if (error) throw error
   return data as { accepted: boolean; correct?: boolean; reason?: string; state: GameSnapshot }
 }
 
 export async function abandonGame(gameId: string): Promise<GameSnapshot> {
-  const { data, error } = await requireSupabase().rpc('abandon_game', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  const { data, error } = await requireSupabase().rpc('abandon_game', { p_game_id: gameId, p_action_id: createUuid() })
   if (error) throw error
   return data as GameSnapshot
 }
@@ -383,7 +384,7 @@ export function subscribeToGame(gameId: string, onChange: () => void) {
   if (!client) return () => undefined
   // A unique topic avoids an old async cleanup closing a replacement channel
   // during React StrictMode remounts or fast route transitions.
-  const channel = client.channel(`game:${gameId}:${crypto.randomUUID()}`)
+  const channel = client.channel(`game:${gameId}:${createUuid()}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, onChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, onChange)
     .subscribe(status => {
@@ -397,7 +398,7 @@ export function subscribeToGame(gameId: string, onChange: () => void) {
 export function subscribeToRoom(roomId: string, onChange: () => void) {
   const client = supabase
   if (!client) return () => undefined
-  const channel = client.channel(`room:${roomId}:${crypto.randomUUID()}`)
+  const channel = client.channel(`room:${roomId}:${createUuid()}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, onChange)
     .subscribe(status => {

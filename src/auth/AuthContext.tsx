@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
+import { createUuid } from '../lib/id'
 
 interface AppUser {
   id: string
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         return
       }
-      const demoUser: AppUser = { id: crypto.randomUUID(), label: identifier.split('@')[0] || '플레이어', source: 'demo', role: 'player', email: identifier.includes('@') ? identifier : null, phone: identifier.includes('@') ? null : identifier, emailConfirmed: false, phoneConfirmed: false }
+      const demoUser: AppUser = { id: createUuid(), label: identifier.split('@')[0] || '플레이어', source: 'demo', role: 'player', email: identifier.includes('@') ? identifier : null, phone: identifier.includes('@') ? null : identifier, emailConfirmed: false, phoneConfirmed: false }
       localStorage.setItem(DEMO_USER_KEY, JSON.stringify(demoUser))
       setUser(demoUser)
     },
@@ -97,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         else setUser(null)
         return { requiresVerification: Boolean(data.user && !data.session) }
       }
-      const demoUser: AppUser = { id: crypto.randomUUID(), label: nickname, source: 'demo', role: 'player', email: identifier.includes('@') ? identifier : null, phone: identifier.includes('@') ? null : identifier, emailConfirmed: false, phoneConfirmed: false }
+      const demoUser: AppUser = { id: createUuid(), label: nickname, source: 'demo', role: 'player', email: identifier.includes('@') ? identifier : null, phone: identifier.includes('@') ? null : identifier, emailConfirmed: false, phoneConfirmed: false }
       localStorage.setItem(DEMO_USER_KEY, JSON.stringify(demoUser))
       setUser(demoUser)
       return { requiresVerification: false }

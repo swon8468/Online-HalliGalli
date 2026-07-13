@@ -1,15 +1,12 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react'
+import { createShortId } from '../lib/id'
 
 type Props = { children: ReactNode }
 type State = { failed: boolean; incidentId: string }
 
 function createIncidentId() {
-  const generated = globalThis.crypto?.randomUUID?.()
-  const randomPart = generated
-    ? generated.slice(0, 6)
-    : Math.random().toString(36).slice(2, 8).padEnd(6, '0')
-  return `UI-${Date.now().toString(36).toUpperCase()}-${randomPart.toUpperCase()}`
+  return `UI-${Date.now().toString(36).toUpperCase()}-${createShortId(6).toUpperCase()}`
 }
 
 export default class AppErrorBoundary extends Component<Props, State> {

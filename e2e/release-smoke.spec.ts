@@ -20,6 +20,9 @@ test('공개 홈과 핵심 메뉴가 오류 없이 열린다', async ({ page }) 
 
 test('placeholder 환경값은 Supabase로 오인되지 않고 보호 경로가 로그인으로 이동한다', async ({ page }) => {
   const errors = watchRuntimeErrors(page)
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: undefined })
+  })
   await page.goto('/create')
   await expect(page).toHaveURL(/\/auth\?next=%2Fcreate$/)
   await expect(page.getByText('개발용 데모 인증이 활성화되어 있어요.')).toBeVisible()

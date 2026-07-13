@@ -16,7 +16,12 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
   const host = await hostContext.newPage()
   const guest = await guestContext.newPage()
   const runtimeErrors: string[] = []
-  for (const page of [host, guest]) page.on('pageerror', error => runtimeErrors.push(error.message))
+  for (const page of [host, guest]) {
+    page.on('pageerror', error => runtimeErrors.push(error.message))
+    await page.addInitScript(() => {
+      Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: undefined })
+    })
+  }
 
   try {
     await Promise.all([login(host, accounts[0].email, password), login(guest, accounts[1].email, password)])
@@ -62,6 +67,15 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     await expect(host.getByText('LIVE GAME')).toBeVisible()
     await expect(guest.getByText('LIVE GAME')).toBeVisible()
     expect(new URL(await host.url()).searchParams.get('game')).toBe(new URL(await guest.url()).searchParams.get('game'))
+
+    const hostDeck = host.getByRole('button', { name: /눌러서 뒤집기/ })
+    const guestDeck = guest.getByRole('button', { name: /눌러서 뒤집기/ })
+    const hostStarts = await hostDeck.isEnabled()
+    const activeDeck = hostStarts ? hostDeck : guestDeck
+    const activePage = hostStarts ? host : guest
+    await activeDeck.click()
+    await expect(activePage.locator('.player-deck strong')).toHaveText('27')
+    await expect(activePage.getByText('ROUND 2')).toBeVisible()
     expect(runtimeErrors).toEqual([])
   } finally {
     await hostContext.close(); await guestContext.close()
