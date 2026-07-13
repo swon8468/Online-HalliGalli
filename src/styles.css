@@ -455,3 +455,5 @@ form label>span,.form-card label>span,.join-form label>span,.auth-card label>spa
 }
 
 @media(prefers-reduced-motion:reduce){.penalty-card,.game-impact,.game-impact>strong,.impact-burst i{animation:none!important}.game-impact{opacity:1}.impact-burst{display:none}}
+
+.option-load-state{margin:0;padding:10px 12px;border-radius:10px;color:var(--muted);background:#f0f0f3;text-align:center;font-size:10px}.option-load-state.is-error{display:grid;justify-items:center;gap:8px;color:var(--danger);background:#fff0f1}.option-load-state button{min-height:34px;padding:0 13px;border:0;border-radius:999px;color:var(--blue);background:#fff;font-size:9px;font-weight:700}
