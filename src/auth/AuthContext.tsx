@@ -67,8 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (data.user) setUser(mapUser(data.user))
         return
       }
-      const isAdminSurface = window.location.hostname.includes('admin.') || window.location.pathname.startsWith('/admin')
-      const demoUser: AppUser = { id: crypto.randomUUID(), label: identifier.split('@')[0] || '플레이어', source: 'demo', role: isAdminSurface ? 'super_admin' : 'player' }
+      const demoUser: AppUser = { id: crypto.randomUUID(), label: identifier.split('@')[0] || '플레이어', source: 'demo', role: 'player' }
       localStorage.setItem(DEMO_USER_KEY, JSON.stringify(demoUser))
       setUser(demoUser)
     },

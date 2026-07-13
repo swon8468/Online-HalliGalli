@@ -19,7 +19,7 @@ export default function Layout() {
           </Link>
           <nav className="topnav" aria-label="주요 메뉴">
             <NavLink to="/rules">게임 룰</NavLink>
-            <NavLink to="/friends"><UsersRound size={17} /><span>친구</span><i>2</i></NavLink>
+            <NavLink to="/friends"><UsersRound size={17} /><span>친구</span></NavLink>
             {user ? <button className="profile-button" onClick={() => void signOut()} aria-label={`${user.label} 로그아웃`} title={`${user.label} · 로그아웃`}><LogOut size={17} /></button> : <Link to="/auth" className="profile-button" aria-label="로그인"><LogIn size={17} /></Link>}
           </nav>
         </header>

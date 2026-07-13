@@ -3,11 +3,22 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@supabase')) return 'supabase'
+          if (id.includes('lucide-react')) return 'icons'
+          if (id.includes('react')) return 'react'
+        }
+      }
+    }
+  },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'push-sw.js'],
       manifest: {
         name: 'Halli Galli Online',
         short_name: 'Halli Galli',
@@ -23,7 +34,8 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        globPatterns: ['**/*.{js,css,html,svg,woff2}']
+        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        importScripts: ['push-sw.js']
       }
     })
   ]

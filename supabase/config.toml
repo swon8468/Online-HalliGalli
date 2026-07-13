@@ -1,0 +1,10 @@
+project_id = "online-halligalli"
+
+[functions.bootstrap-super-admin]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = true
+
+[functions.admin-actions]
+verify_jwt = true

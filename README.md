@@ -6,11 +6,11 @@ React, TypeScript, Vite, Supabase로 구성한 실시간 카드 게임 PWA입니
 
 ```bash
 npm install
-cp .env.development.example .env.development.local
+cp .env.development.example .env.development
 npm run dev
 ```
 
-Supabase 키가 없어도 개발용 데모 인증과 UI는 동작합니다. 실제 기능을 연결하려면 `.env.development.local`에 개발 Supabase URL과 anon key를 입력하고 `supabase/migrations`의 SQL을 적용하세요.
+Supabase 키가 없어도 개발용 데모 인증과 UI는 동작합니다. 실제 기능을 연결하려면 `.env.development`에 개발 Supabase URL과 anon key를 입력하고 `supabase/migrations`의 SQL을 적용하세요.
 
 ## 명령어
 

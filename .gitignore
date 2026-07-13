@@ -3,6 +3,9 @@ dist
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
 .DS_Store
 *.tsbuildinfo
 .vite
+supabase/.temp/

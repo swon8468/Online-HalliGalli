@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, Bot, DoorOpen, Radio, Sparkles, UsersRound } from 'lucide-react'
+import { ArrowRight, BookOpen, Bot, DoorOpen, Radio, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Fruit } from '../components/Fruit'
 
@@ -15,7 +15,7 @@ export default function Home() {
     <div className="home-page">
       <section className="hero">
         <div className="hero-copy">
-          <div className="presence"><span /> 1,284명 플레이 중</div>
+          <div className="presence"><span /> 실시간 온라인</div>
           <h1>다섯이 되는 순간,<br /><em>종을 울리세요.</em></h1>
           <p>친구와 함께, 어디서든. 가장 빠른 손이 승리합니다.</p>
         </div>
@@ -43,11 +43,6 @@ export default function Home() {
         ))}
       </section>
 
-      <Link to="/friends" className="friend-strip">
-        <span className="friend-stack"><i>J</i><i>M</i><i>S</i></span>
-        <span><strong>친구 3명이 온라인이에요.</strong><small>함께 게임을 시작해 보세요.</small></span>
-        <UsersRound size={21} />
-      </Link>
     </div>
   )
 }

@@ -8,6 +8,10 @@
     "dev:prod": "vite --mode production",
     "build:develop": "tsc -b && vite build --mode development",
     "build": "tsc -b && vite build --mode production",
+    "keys:vapid": "node scripts/generate-vapid.mjs",
+    "env:migrate": "node scripts/migrate-env-files.mjs",
+    "supabase:deploy:develop": "node scripts/deploy-supabase.mjs development",
+    "supabase:deploy:production": "node scripts/deploy-supabase.mjs production",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -27,6 +31,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "supabase": "^2.109.1",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.35.1",
     "vite": "^7.0.4",

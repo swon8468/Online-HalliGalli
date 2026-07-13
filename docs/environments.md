@@ -7,11 +7,14 @@
 
 ## 환경 파일
 
-- 로컬 개발: `.env.development.local`
-- 로컬 운영 빌드 확인: `.env.production.local`
+- 로컬 개발: `.env.development`
+- 로컬 운영 빌드 확인: `.env.production`
 - Git에는 실제 키를 커밋하지 않고 `.env.*.example`만 보관한다.
 - Cloudflare Pages에는 각 프로젝트/환경별로 동일한 변수 이름과 서로 다른 값을 설정한다.
 - `SUPABASE_SERVICE_ROLE_KEY`, VAPID private key는 Vite 변수로 설정하지 않는다.
+- `npm run keys:vapid`는 개발/운영 VAPID 키와 일회성 관리자 부트스트랩 비밀값을 생성한다.
+- 공개키는 `.env.development`/`.env.production`, 비밀키는 `supabase/.env.*.local`에 기록되며 실제 파일은 모두 Git에서 제외된다.
+- Supabase 배포 시 `supabase secrets set --env-file supabase/.env.<environment>.local`로 해당 프로젝트에 비밀값을 등록한다.
 
 ## 배포 흐름
 

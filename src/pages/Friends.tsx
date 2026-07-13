@@ -1,6 +1,8 @@
 import { BellRing, Check, Clock3, Search, UserPlus, UsersRound, X } from 'lucide-react'
 import { useState } from 'react'
+import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
+import { enablePushNotifications } from '../lib/push'
 
 const initialFriends = [
   { name: '제이미', tag: 'jamie#2048', online: true, color: '1' },
@@ -9,14 +11,17 @@ const initialFriends = [
 ]
 
 export default function Friends() {
+  const { user } = useAuth()
   const [tab, setTab] = useState<'friends' | 'requests'>('friends')
   const [requestVisible, setRequestVisible] = useState(true)
+  const [pushStatus, setPushStatus] = useState('')
   return (
     <div className="content-page friends-page">
       <PageHeader eyebrow="FRIENDS" title="함께하면 더 즐거워요." description="친구의 상태를 확인하고 게임에 초대하세요." />
       <div className="friends-toolbar">
         <div className="segmented-control"><button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>친구 <span>3</span></button><button className={tab === 'requests' ? 'is-active' : ''} onClick={() => setTab('requests')}>요청 <span>{requestVisible ? 1 : 0}</span></button></div>
         <label className="search-field"><Search /><input placeholder="닉네임 또는 태그 검색" /><button aria-label="친구 추가"><UserPlus /></button></label>
+        <button className="push-enable" onClick={() => user && void enablePushNotifications(user.id).then(() => setPushStatus('알림 켜짐')).catch(error => setPushStatus(error instanceof Error ? error.message : '알림 설정 실패'))}><BellRing /> {pushStatus || '초대 알림 켜기'}</button>
       </div>
       {tab === 'friends' ? (
         <section className="friends-list">
