@@ -64,6 +64,24 @@ const outsiderDraft = await outsider.from('card_sets').select('id').eq('id', car
 if (outsiderDraft.error || outsiderDraft.data.length !== 0) throw outsiderDraft.error ?? new Error('초안 카드가 외부 사용자에게 노출됨')
 
 const png = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,8,215,99,248,207,192,240,31,0,5,0,1,255,137,153,61,29,0,0,0,0,73,69,78,68,174,66,96,130])
+const suspendedAssetPath = `${cardSet.id}/suspended-${Date.now()}.png`
+const managerUserId = users.get(identities[0].email).id
+const suspended = await admin.from('profiles').update({ suspended_until: new Date(Date.now() + 60_000).toISOString() }).eq('id', managerUserId)
+if (suspended.error) throw suspended.error
+try {
+  const suspendedUpload = await manager.storage.from('card-assets').upload(suspendedAssetPath, png, { contentType: 'image/png' })
+  if (!suspendedUpload.error) {
+    await admin.storage.from('card-assets').remove([suspendedAssetPath])
+    throw new Error('정지 전에 발급된 세션으로 카드 파일 업로드가 허용됨')
+  }
+} finally {
+  const restored = await admin.from('profiles').update({ suspended_until: null }).eq('id', managerUserId)
+  if (restored.error) throw restored.error
+}
+const restoredUpload = await manager.storage.from('card-assets').upload(suspendedAssetPath, png, { contentType: 'image/png' })
+if (restoredUpload.error) throw new Error(`정지 해제 후 기존 세션의 카드 업로드 복구 실패: ${restoredUpload.error.message}`)
+const restoredCleanup = await manager.storage.from('card-assets').remove([suspendedAssetPath])
+if (restoredCleanup.error) throw restoredCleanup.error
 const assetPath = `${cardSet.id}/test-${Date.now()}.png`
 const upload = await manager.storage.from('card-assets').upload(assetPath, png, { contentType: 'image/png' })
 if (upload.error) throw upload.error
@@ -97,4 +115,4 @@ if (deletedSet.data?.storageCleanupPending || deletedSet.data?.removedAssets !==
 const remainingAssets = await admin.storage.from('card-assets').list(cardSet.id, { limit: 100 })
 if (remainingAssets.error || remainingAssets.data.some(item => item.id)) throw remainingAssets.error ?? new Error('삭제된 카드 세트 파일이 Storage에 남았습니다.')
 
-console.log('verified default 56-card set, draft isolation, image validation, v1/v2 publishing, cloning, deletion, room selection, and in-use protection')
+console.log('verified active-manager storage enforcement, default 56-card set, draft isolation, image validation, v1/v2 publishing, cloning, deletion, room selection, and in-use protection')

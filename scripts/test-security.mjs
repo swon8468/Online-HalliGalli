@@ -43,6 +43,20 @@ if (resetSecurityProfile.error) throw resetSecurityProfile.error
 const signed = await player.auth.signInWithPassword({ email: securityEmail, password })
 if (signed.error || !signed.data.user) throw signed.error ?? new Error('보안 테스트 사용자 로그인 실패')
 
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+const subscribe = channel => new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error('Realtime 구독 시간 초과')), 8_000)
+  channel.subscribe(status => {
+    if (status === 'SUBSCRIBED') {
+      clearTimeout(timeout)
+      resolve()
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      clearTimeout(timeout)
+      reject(new Error(`Realtime 구독 실패: ${status}`))
+    }
+  })
+})
+
 const evilOrigin = 'https://attacker.invalid'
 const rejectedOrigin = await fetch(`${url}/functions/v1/admin-actions`, {
   method: 'OPTIONS',
@@ -136,6 +150,13 @@ const securityRoom = await admin.from('rooms').insert({
   kind: 'private', status: 'playing', host_id: signed.data.user.id, max_players: 2,
 }).select('id').single()
 if (securityRoom.error) throw securityRoom.error
+const securityRoomMember = await admin.from('room_members').insert({
+  room_id: securityRoom.data.id,
+  user_id: signed.data.user.id,
+  role: 'host',
+  seat: 0,
+})
+if (securityRoomMember.error) throw securityRoomMember.error
 const securityGame = await admin.from('games').insert({
   room_id: securityRoom.data.id,
   current_turn: signed.data.user.id,
@@ -149,6 +170,49 @@ const securityPlayer = await admin.from('game_players').insert({
   card_count: 1,
 })
 if (securityPlayer.error) throw securityPlayer.error
+
+let suspendedRoomEvents = 0
+let restoredRoomEvents = 0
+let suspendedChannel
+let restoredChannel
+try {
+  const suspendedProfile = await admin.from('profiles').update({
+    suspended_until: new Date(Date.now() + 60_000).toISOString(),
+    suspension_reason: 'Realtime 보안 자동 테스트',
+  }).eq('id', signed.data.user.id)
+  if (suspendedProfile.error) throw suspendedProfile.error
+
+  suspendedChannel = player.channel(`security-suspended-${randomUUID()}`)
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${securityRoom.data.id}`,
+    }, () => { suspendedRoomEvents += 1 })
+  await subscribe(suspendedChannel)
+  await wait(300)
+  const hiddenUpdate = await admin.from('rooms').update({ updated_at: new Date().toISOString() }).eq('id', securityRoom.data.id)
+  if (hiddenUpdate.error) throw hiddenUpdate.error
+  await wait(4_000)
+  if (suspendedRoomEvents !== 0) throw new Error('정지 전에 발급된 세션이 Realtime 방 변경을 수신했습니다.')
+  await player.removeChannel(suspendedChannel)
+  suspendedChannel = undefined
+
+  const restoredProfile = await admin.from('profiles').update({ suspended_until: null, suspension_reason: null }).eq('id', signed.data.user.id)
+  if (restoredProfile.error) throw restoredProfile.error
+  restoredChannel = player.channel(`security-restored-${randomUUID()}`)
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${securityRoom.data.id}`,
+    }, () => { restoredRoomEvents += 1 })
+  await subscribe(restoredChannel)
+  await wait(300)
+  const visibleUpdate = await admin.from('rooms').update({ updated_at: new Date(Date.now() + 1_000).toISOString() }).eq('id', securityRoom.data.id)
+  if (visibleUpdate.error) throw visibleUpdate.error
+  for (let attempt = 0; restoredRoomEvents === 0 && attempt < 20; attempt += 1) await wait(100)
+  if (restoredRoomEvents !== 1) throw new Error(`정지 해제 후 Realtime 복구 실패 (${restoredRoomEvents}건)`)
+} finally {
+  if (suspendedChannel) await player.removeChannel(suspendedChannel)
+  if (restoredChannel) await player.removeChannel(restoredChannel)
+  const restoredProfile = await admin.from('profiles').update({ suspended_until: null, suspension_reason: null }).eq('id', signed.data.user.id)
+  if (restoredProfile.error) throw restoredProfile.error
+}
 const existingGame = { data: { game_id: securityGame.data.id, user_id: signed.data.user.id } }
 const directEvent = await player.from('game_events').insert({
   game_id: existingGame.data.game_id,
@@ -193,4 +257,4 @@ if (!secondRing.error || !secondRing.error.message.includes('game_action_rate_li
 const removedSecurityRoom = await admin.from('rooms').delete().eq('id', securityRoom.data.id)
 if (removedSecurityRoom.error) throw removedSecurityRoom.error
 
-console.log('verified strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, direct game-event denial, and server game-action rate limiting')
+console.log('verified strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, inactive-session Realtime denial and recovery, direct game-event denial, and server game-action rate limiting')
