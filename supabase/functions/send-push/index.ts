@@ -42,21 +42,32 @@ Deno.serve(async request => {
 
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const sentAt = new Date().toISOString()
-  const claimed = await admin.from('game_invites')
-    .update({ push_sent_at: sentAt, updated_at: sentAt })
-    .eq('id', payload.inviteId)
-    .eq('sender_id', user.id)
-    .eq('status', 'pending')
-    .gt('expires_at', sentAt)
-    .is('push_sent_at', null)
-    .select('id,sender_id,receiver_id,room_id,status,expires_at,push_sent_at')
-    .maybeSingle()
+  const claimed = await admin.rpc('claim_game_invite_push', {
+    p_invite_id: payload.inviteId,
+    p_sender_id: user.id,
+    p_sent_at: sentAt,
+  })
   if (claimed.error) return Response.json({ error: 'push_claim_failed' }, { status: 500, headers })
 
-  const invite = claimed.data
+  const invite = claimed.data as {
+    id: string
+    sender_id: string
+    receiver_id: string
+    room_id: string
+    status: string
+    expires_at: string
+    push_sent_at: string
+  } | null
   if (!invite) {
-    const existing = await admin.from('game_invites').select('sender_id,status,expires_at,push_sent_at').eq('id', payload.inviteId).maybeSingle()
-    if (existing.error) return Response.json({ error: 'push_lookup_failed' }, { status: 500, headers })
+    const [existing, actor] = await Promise.all([
+      admin.from('game_invites').select('sender_id,status,expires_at,push_sent_at').eq('id', payload.inviteId).maybeSingle(),
+      admin.from('profiles').select('deleted_at,suspended_until').eq('id', user.id).maybeSingle(),
+    ])
+    if (existing.error || actor.error) return Response.json({ error: 'push_lookup_failed' }, { status: 500, headers })
+    const actorIsActive = Boolean(actor.data)
+      && !actor.data?.deleted_at
+      && (!actor.data?.suspended_until || new Date(actor.data.suspended_until) <= new Date())
+    if (!actorIsActive) return Response.json({ error: 'account_inactive' }, { status: 403, headers })
     const duplicate = existing.data?.sender_id === user.id
       && existing.data.status === 'pending'
       && new Date(existing.data.expires_at) > new Date()

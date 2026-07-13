@@ -75,6 +75,29 @@ try {
     expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
   }).select('id').single()
   if (inviteResult.error) throw inviteResult.error
+  const directClaim = await clients[0].rpc('claim_game_invite_push', {
+    p_invite_id: inviteResult.data.id,
+    p_sender_id: createdIds[0],
+    p_sent_at: new Date().toISOString(),
+  })
+  if (!directClaim.error) throw new Error('클라이언트가 내부 푸시 선점 RPC를 직접 호출했습니다.')
+
+  const suspendedSender = await admin.from('profiles').update({
+    suspended_until: new Date(Date.now() + 60_000).toISOString(),
+    suspension_reason: '푸시 보안 자동 테스트',
+  }).eq('id', createdIds[0])
+  if (suspendedSender.error) throw suspendedSender.error
+  try {
+    const suspendedDelivery = await clients[0].functions.invoke('send-push', { body: { inviteId: inviteResult.data.id } })
+    if (!suspendedDelivery.error) throw new Error('정지 전에 발급된 세션의 푸시 전송이 허용되었습니다.')
+    const unclaimedWhileSuspended = await admin.from('game_invites').select('push_sent_at').eq('id', inviteResult.data.id).single()
+    if (unclaimedWhileSuspended.error || unclaimedWhileSuspended.data.push_sent_at) {
+      throw unclaimedWhileSuspended.error ?? new Error('정지 계정 요청이 푸시 전송을 선점했습니다.')
+    }
+  } finally {
+    const restoredSender = await admin.from('profiles').update({ suspended_until: null, suspension_reason: null }).eq('id', createdIds[0])
+    if (restoredSender.error) throw restoredSender.error
+  }
 
   const forgedDelivery = await clients[1].functions.invoke('send-push', { body: { inviteId: inviteResult.data.id } })
   if (!forgedDelivery.error) throw new Error('초대 발신자가 아닌 사용자의 푸시 전송이 허용되었습니다.')
@@ -93,7 +116,7 @@ try {
   const claimedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', inviteResult.data.id).single()
   if (claimedInvite.error || !claimedInvite.data.push_sent_at) throw claimedInvite.error ?? new Error('푸시 전송 claim 기록 실패')
 
-  console.log('verified authenticated push registration, shared-device endpoint reassignment, RLS ownership, and idempotent invite delivery')
+  console.log('verified authenticated push registration, shared-device endpoint reassignment, inactive-session denial, RLS ownership, and idempotent invite delivery')
 } finally {
   if (roomId) await admin.from('rooms').delete().eq('id', roomId)
   for (const id of createdIds) await admin.auth.admin.deleteUser(id)
