@@ -1,5 +1,5 @@
 import { ArrowRightLeft, Check, Copy, Crown, LogOut, Minus, Plus, Share2, UserRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
@@ -35,25 +35,36 @@ export default function RoomLobby() {
   const [confirmAction, setConfirmAction] = useState<'leave' | 'close' | null>(null)
   const [kickTarget, setKickTarget] = useState<RoomMemberInfo | null>(null)
   const [kickReason, setKickReason] = useState('')
+  const refreshPromiseRef = useRef<Promise<void> | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (ensureFresh = false) => {
     if (!roomId) return
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current
+    if (refreshPromiseRef.current) return refreshPromiseRef.current
+    const request = (async () => {
+      try {
+        const [nextRoom, nextPlayers] = await Promise.all([loadRoom(roomId), loadRoomMembers(roomId)])
+        if (user && !nextPlayers.some(player => player.userId === user.id)) {
+          const removal = await getMyRoomRemoval(roomId).catch(() => ({ kicked: false, reason: undefined, left: false }))
+          const query = new URLSearchParams({ reason: removal.kicked ? 'kicked' : 'removed' })
+          if (removal.reason) query.set('detail', removal.reason)
+          navigate(`/join?${query}`, { replace: true }); return
+        }
+        if (nextRoom.status === 'playing') {
+          const gameId = await loadRoomGame(roomId)
+          if (gameId) { navigate(`/game?game=${encodeURIComponent(gameId)}`, { replace: true }); return }
+        }
+        if (nextRoom.status === 'closed') { navigate('/join?reason=closed', { replace: true }); return }
+        setRoom(nextRoom); setPlayers(nextPlayers); setError('')
+      } catch (cause) { setError(roomErrorMessage(cause)) }
+      finally { setLoading(false) }
+    })()
+    refreshPromiseRef.current = request
     try {
-      const [nextRoom, nextPlayers] = await Promise.all([loadRoom(roomId), loadRoomMembers(roomId)])
-      if (user && !nextPlayers.some(player => player.userId === user.id)) {
-        const removal = await getMyRoomRemoval(roomId).catch(() => ({ kicked: false, reason: undefined, left: false }))
-        const query = new URLSearchParams({ reason: removal.kicked ? 'kicked' : 'removed' })
-        if (removal.reason) query.set('detail', removal.reason)
-        navigate(`/join?${query}`, { replace: true }); return
-      }
-      if (nextRoom.status === 'playing') {
-        const gameId = await loadRoomGame(roomId)
-        if (gameId) { navigate(`/game?game=${encodeURIComponent(gameId)}`, { replace: true }); return }
-      }
-      if (nextRoom.status === 'closed') { navigate('/join?reason=closed', { replace: true }); return }
-      setRoom(nextRoom); setPlayers(nextPlayers); setError('')
-    } catch (cause) { setError(roomErrorMessage(cause)) }
-    finally { setLoading(false) }
+      await request
+    } finally {
+      if (refreshPromiseRef.current === request) refreshPromiseRef.current = null
+    }
   }, [navigate, roomId, user])
 
   const connection = useSessionHeartbeat('room', roomId, () => void refresh())
@@ -71,7 +82,7 @@ export default function RoomLobby() {
 
   const run = async (action: () => Promise<unknown>, success?: string) => {
     setBusy(true); setError(''); setMessage('')
-    try { await action(); if (success) setMessage(success); await refresh() }
+    try { await action(); if (success) setMessage(success); await refresh(true) }
     catch (cause) { setError(roomErrorMessage(cause)) }
     finally { setBusy(false) }
   }

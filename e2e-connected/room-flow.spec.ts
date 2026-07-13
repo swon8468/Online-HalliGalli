@@ -28,9 +28,18 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
   try {
     await Promise.all([login(host, accounts[0].email, password), login(guest, accounts[1].email, password)])
     await host.goto('/create')
+    let initialLobbyReads = 0
+    await host.route('**/rest/v1/rooms?*', async route => {
+      if (route.request().method() !== 'GET') return route.continue()
+      initialLobbyReads += 1
+      await new Promise(resolve => setTimeout(resolve, 1_200))
+      await route.continue()
+    })
     await host.getByRole('button', { name: '방 만들기', exact: true }).click()
     await expect(host).toHaveURL(/\/room\/[0-9a-f-]+$/)
     const code = (await host.locator('.room-code').innerText()).replace(/\s/g, '')
+    expect(initialLobbyReads).toBe(1)
+    await host.unroute('**/rest/v1/rooms?*')
     expect(code).toMatch(/^[A-Z]{3}[0-9]{3}$/)
 
     let heartbeatRequests = 0
