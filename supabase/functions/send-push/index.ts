@@ -4,11 +4,14 @@ import webpush from 'npm:web-push@3.6.7'
 const configuredOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? 'https://develop.haligali.swonport.kr,https://haligali.swonport.kr')
   .split(',').map(value => value.trim()).filter(Boolean)
 
+function isAllowedOrigin(origin: string) {
+  return configuredOrigins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+}
+
 function corsHeaders(request: Request) {
   const origin = request.headers.get('Origin') ?? ''
-  const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
   return {
-    'Access-Control-Allow-Origin': configuredOrigins.includes(origin) || localOrigin ? origin : configuredOrigins[0],
+    ...(isAllowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',
@@ -18,7 +21,7 @@ function corsHeaders(request: Request) {
 Deno.serve(async request => {
   const headers = corsHeaders(request)
   const origin = request.headers.get('Origin') ?? ''
-  if (origin && headers['Access-Control-Allow-Origin'] !== origin) return Response.json({ error: 'origin_not_allowed' }, { status: 403, headers })
+  if (origin && !isAllowedOrigin(origin)) return Response.json({ error: 'origin_not_allowed' }, { status: 403, headers })
   if (request.method === 'OPTIONS') return Response.json({ ok: true }, { headers })
   if (request.method !== 'POST') return Response.json({ error: 'method_not_allowed' }, { status: 405, headers })
 
@@ -38,8 +41,27 @@ Deno.serve(async request => {
   }
 
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
-  const { data: invite } = await admin.from('game_invites').select('id,sender_id,receiver_id,room_id,status,expires_at').eq('id', payload.inviteId).single()
-  if (!invite || invite.sender_id !== user.id || invite.status !== 'pending' || new Date(invite.expires_at) <= new Date()) {
+  const sentAt = new Date().toISOString()
+  const claimed = await admin.from('game_invites')
+    .update({ push_sent_at: sentAt, updated_at: sentAt })
+    .eq('id', payload.inviteId)
+    .eq('sender_id', user.id)
+    .eq('status', 'pending')
+    .gt('expires_at', sentAt)
+    .is('push_sent_at', null)
+    .select('id,sender_id,receiver_id,room_id,status,expires_at,push_sent_at')
+    .maybeSingle()
+  if (claimed.error) return Response.json({ error: 'push_claim_failed' }, { status: 500, headers })
+
+  const invite = claimed.data
+  if (!invite) {
+    const existing = await admin.from('game_invites').select('sender_id,status,expires_at,push_sent_at').eq('id', payload.inviteId).maybeSingle()
+    if (existing.error) return Response.json({ error: 'push_lookup_failed' }, { status: 500, headers })
+    const duplicate = existing.data?.sender_id === user.id
+      && existing.data.status === 'pending'
+      && new Date(existing.data.expires_at) > new Date()
+      && Boolean(existing.data.push_sent_at)
+    if (duplicate) return Response.json({ delivered: 0, duplicate: true }, { headers })
     return Response.json({ error: 'invalid_invite' }, { status: 403, headers })
   }
 
@@ -63,5 +85,5 @@ Deno.serve(async request => {
     }
   }
 
-  return Response.json({ delivered }, { headers })
+  return Response.json({ delivered, duplicate: false }, { headers })
 })

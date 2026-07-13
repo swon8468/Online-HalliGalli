@@ -24,6 +24,7 @@ const admin = createClient(url, service, { auth: { persistSession: false, autoRe
 const password = process.env.TEST_USER_PASSWORD || `Push-${createHash('sha256').update(accessToken).digest('hex').slice(0, 18)}!`
 const accounts = [0, 1].map(index => ({ email: `push-e2e-${index + 1}@swonport.kr`, nickname: `푸시검증${index + 1}` }))
 const createdIds = []
+let roomId = null
 
 try {
   const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
@@ -65,7 +66,35 @@ try {
   const removed = await admin.from('push_subscriptions').select('id').eq('endpoint', endpoint).maybeSingle()
   if (removed.error || removed.data) throw removed.error ?? new Error('현재 사용자의 구독 해제가 반영되지 않았습니다.')
 
-  console.log('verified authenticated push registration, shared-device endpoint reassignment, RLS ownership, and cleanup')
+  const roomResult = await clients[0].rpc('create_private_room', { p_max_players: 2 })
+  if (roomResult.error) throw roomResult.error
+  const room = Array.isArray(roomResult.data) ? roomResult.data[0] : roomResult.data
+  roomId = room.id
+  const inviteResult = await admin.from('game_invites').insert({
+    sender_id: createdIds[0], receiver_id: createdIds[1], room_id: roomId,
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+  }).select('id').single()
+  if (inviteResult.error) throw inviteResult.error
+
+  const forgedDelivery = await clients[1].functions.invoke('send-push', { body: { inviteId: inviteResult.data.id } })
+  if (!forgedDelivery.error) throw new Error('초대 발신자가 아닌 사용자의 푸시 전송이 허용되었습니다.')
+  const unclaimedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', inviteResult.data.id).single()
+  if (unclaimedInvite.error || unclaimedInvite.data.push_sent_at) throw unclaimedInvite.error ?? new Error('권한 없는 요청이 푸시 전송을 선점했습니다.')
+
+  const deliveries = await Promise.all([
+    clients[0].functions.invoke('send-push', { body: { inviteId: inviteResult.data.id } }),
+    clients[0].functions.invoke('send-push', { body: { inviteId: inviteResult.data.id } }),
+  ])
+  if (deliveries.some(result => result.error)) throw deliveries.find(result => result.error).error
+  if (deliveries.filter(result => result.data?.duplicate === true).length !== 1
+    || deliveries.filter(result => result.data?.duplicate === false).length !== 1) {
+    throw new Error('동일 초대 푸시의 원자적 1회 전송 보장 실패')
+  }
+  const claimedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', inviteResult.data.id).single()
+  if (claimedInvite.error || !claimedInvite.data.push_sent_at) throw claimedInvite.error ?? new Error('푸시 전송 claim 기록 실패')
+
+  console.log('verified authenticated push registration, shared-device endpoint reassignment, RLS ownership, and idempotent invite delivery')
 } finally {
+  if (roomId) await admin.from('rooms').delete().eq('id', roomId)
   for (const id of createdIds) await admin.auth.admin.deleteUser(id)
 }
