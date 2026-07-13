@@ -3,7 +3,7 @@ import {
   DoorOpen, Eye, History, LayoutDashboard, LogOut, MoreHorizontal, RotateCcw, Search,
   ShieldCheck, UserCog, UserX, UsersRound, X,
 } from 'lucide-react'
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isDevelopment } from '../lib/environment'
@@ -59,16 +59,19 @@ export default function AdminDashboard() {
   const [draft, setDraft] = useState<ActionDraft | null>(null)
   const [detail, setDetail] = useState<AdminUserRow | AdminRoomRow | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const refreshPromiseRef = useRef<ReturnType<typeof fetchAdminData> | null>(null)
 
-  const refresh = async (silent = false) => {
+  const refresh = useCallback(async (silent = false, ensureFresh = false) => {
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
     if (!silent) setLoading(true)
     setError('')
-    try { setData(await fetchAdminData()) }
-    catch (caught) { setError(getErrorMessage(caught, '관리자 데이터를 불러오지 못했습니다.')) }
+    if (!refreshPromiseRef.current) refreshPromiseRef.current = fetchAdminData().finally(() => { refreshPromiseRef.current = null })
+    try { setData(await refreshPromiseRef.current) }
+    catch { setError('관리자 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.') }
     finally { if (!silent) setLoading(false) }
-  }
+  }, [])
 
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { void refresh() }, [refresh])
   useEffect(() => { setPage(1) }, [query, userStatus, roomStatus, section])
 
   const openAction = (action: AdminAction, targetId: string | undefined, targetLabel: string, role: PlatformRole = 'support') => {
@@ -87,7 +90,7 @@ export default function AdminDashboard() {
     if (draft.action === 'create_admin') Object.assign(payload, { role: draft.role, email: draft.email, password: draft.password, nickname: draft.nickname })
     try {
       await executeAdminAction(payload)
-      await refresh(true)
+      await refresh(true, true)
       setDraft(null)
       setDetail(null)
       setNotice('관리 조치가 완료되고 감사 로그에 기록되었습니다.')
@@ -110,7 +113,7 @@ export default function AdminDashboard() {
       <main className="admin-main">
         <header className="admin-header"><div><p>PLATFORM CONTROL</p><h1>{sections.find(item => item.id === section)?.label}</h1></div><label><Search /><input aria-label="관리자 통합 검색" placeholder="사용자, 방, 감사 로그 검색" value={query} onChange={event => setQuery(event.target.value)} /></label></header>
         {actorRole === 'support' && <div className="admin-readonly"><Eye /> 지원 담당자는 모든 운영 정보를 조회할 수 있지만 변경할 수는 없습니다.</div>}
-        {error && <div className="admin-error" role="alert">{error}</div>}
+        {error && <div className="admin-error" role="alert"><span>{error}</span><button onClick={() => void refresh()}>관리자 데이터 다시 불러오기</button></div>}
         {notice && <div className="admin-success" role="status"><CheckCircle2 />{notice}</div>}
         {loading ? <AdminLoading /> : <>
           {section === 'dashboard' && <DashboardOverview data={data} query={query} canMutate={canMutate} onRoomAction={room => openAction('close_room', room.id, room.code)} onDetail={setDetail} />}
