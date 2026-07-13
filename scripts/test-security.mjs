@@ -76,6 +76,12 @@ if (unauthenticatedPush.status !== 401) throw new Error('인증되지 않은 푸
 
 const bootstrap = await player.rpc('complete_platform_bootstrap', { p_user_id: signed.data.user.id })
 if (!bootstrap.error) throw new Error('일반 사용자가 최초 슈퍼 관리자 RPC를 호출했습니다.')
+const directAccountDeletion = await player.rpc('finalize_account_deletion', {
+  p_user_id: signed.data.user.id,
+  p_deleted_tag: `deleted#${signed.data.user.id.replaceAll('-', '').slice(0, 8)}`,
+  p_deleted_at: new Date().toISOString(),
+})
+if (!directAccountDeletion.error) throw new Error('일반 사용자가 계정 탈퇴 내부 RPC를 직접 호출했습니다.')
 
 const target = await admin.from('profiles').select('id,nickname').neq('id', signed.data.user.id).limit(1).single()
 if (target.error) throw target.error
@@ -146,4 +152,4 @@ if (!secondRing.error || !secondRing.error.message.includes('game_action_rate_li
 const removedSecurityRoom = await admin.from('rooms').delete().eq('id', securityRoom.data.id)
 if (removedSecurityRoom.error) throw removedSecurityRoom.error
 
-console.log('verified strict admin/push CORS, push authentication, bootstrap RPC denial, cross-user profile isolation, direct game-event denial, and server game-action rate limiting')
+console.log('verified strict admin/push CORS, push authentication, internal RPC denial, cross-user profile isolation, direct game-event denial, and server game-action rate limiting')
