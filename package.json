@@ -12,6 +12,9 @@
     "env:migrate": "node scripts/migrate-env-files.mjs",
     "supabase:deploy:develop": "node scripts/deploy-supabase.mjs development",
     "supabase:deploy:production": "node scripts/deploy-supabase.mjs production",
+    "test-users:seed": "node scripts/seed-test-users.mjs",
+    "test-room:join": "node scripts/join-test-room.mjs",
+    "test-room:verify": "node scripts/verify-test-room.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

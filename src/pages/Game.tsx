@@ -1,7 +1,9 @@
 import { Bell, ChevronLeft, Clock3, Settings, Volume2, VolumeX } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 import { Fruit, type FruitKind } from '../components/Fruit'
+import { loadGamePlayers, type GamePlayerInfo } from '../lib/rooms'
 
 const deck: { kind: FruitKind; count: number }[] = [
   { kind: 'strawberry', count: 3 }, { kind: 'lime', count: 2 }, { kind: 'banana', count: 4 },
@@ -10,15 +12,26 @@ const deck: { kind: FruitKind; count: number }[] = [
 
 export default function Game() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [searchParams] = useSearchParams()
   const isBotMode = searchParams.get('mode') === 'bot'
   const difficulty = searchParams.get('difficulty') ?? 'normal'
+  const gameId = searchParams.get('game')
   const [cardIndex, setCardIndex] = useState(0)
   const [sound, setSound] = useState(true)
   const [message, setMessage] = useState('내 차례예요. 카드를 뒤집으세요.')
   const [score, setScore] = useState(14)
+  const [players, setPlayers] = useState<GamePlayerInfo[]>([])
   const card = deck[cardIndex % deck.length]
   const isCorrect = card.kind === 'strawberry' && card.count === 3
+
+  useEffect(() => {
+    if (isBotMode || !gameId) return
+    void loadGamePlayers(gameId).then(loaded => {
+      setPlayers(loaded)
+      setScore(loaded.find(player => player.userId === user?.id)?.cardCount ?? 0)
+    })
+  }, [gameId, isBotMode, user?.id])
 
   const reveal = () => {
     setCardIndex(index => index + 1)
@@ -43,7 +56,7 @@ export default function Game() {
       </header>
 
       <div className="opponents">
-        {isBotMode ? <div className="opponent is-turn bot-opponent"><span className="avatar avatar--2">BOT<i className="is-online" /></span><strong>연습 봇</strong><small>{difficulty === 'easy' ? '천천히' : difficulty === 'hard' ? '빠르게' : '보통'} · 카드 28장</small></div> : <><div className="opponent"><span className="avatar avatar--1">제<i className="is-online" /></span><strong>제이미</strong><small>카드 18장</small></div><div className="opponent is-turn"><span className="avatar avatar--2">민<i className="is-online" /></span><strong>민서</strong><small>카드 12장</small></div><div className="opponent"><span className="avatar avatar--3">수<i className="is-online" /></span><strong>수현</strong><small>카드 16장</small></div></>}
+        {isBotMode ? <div className="opponent is-turn bot-opponent"><span className="avatar avatar--2">BOT<i className="is-online" /></span><strong>연습 봇</strong><small>{difficulty === 'easy' ? '천천히' : difficulty === 'hard' ? '빠르게' : '보통'} · 카드 28장</small></div> : players.filter(player => player.userId !== user?.id).map((player, index) => <div className={`opponent ${player.isCurrentTurn ? 'is-turn' : ''}`} key={player.userId}><span className={`avatar avatar--${index + 1}`}>{player.nickname[0]}<i className="is-online" /></span><strong>{player.nickname}</strong><small>카드 {player.cardCount}장</small></div>)}
       </div>
 
       <section className="game-table">
