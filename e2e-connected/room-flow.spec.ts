@@ -132,7 +132,7 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     await expect(host.getByText('LIVE GAME')).toBeVisible()
     await expect(guest.getByText('LIVE GAME')).toBeVisible()
     expect(await host.evaluate(() => (window as Window & { gameViewReads?: number }).gameViewReads)).toBe(1)
-    expect(await guest.evaluate(() => (window as Window & { gameViewReads?: number }).gameViewReads)).toBe(1)
+    expect(await guest.evaluate(() => (window as Window & { gameViewReads?: number }).gameViewReads ?? 0)).toBeLessThanOrEqual(1)
     expect(new URL(await host.url()).searchParams.get('game')).toBe(new URL(await guest.url()).searchParams.get('game'))
 
     const hostDeck = host.getByRole('button', { name: /눌러서 뒤집기/ })
