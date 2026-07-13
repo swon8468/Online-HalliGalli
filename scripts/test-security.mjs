@@ -43,6 +43,28 @@ if (resetSecurityProfile.error) throw resetSecurityProfile.error
 const signed = await player.auth.signInWithPassword({ email: securityEmail, password })
 if (signed.error || !signed.data.user) throw signed.error ?? new Error('보안 테스트 사용자 로그인 실패')
 
+const anonymousClient = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } })
+for (const [name, parameters] of [
+  ['profile_is_active', { p_user_id: signed.data.user.id }],
+  ['get_my_active_session', undefined],
+  ['create_private_room', { p_max_players: 2 }],
+]) {
+  const result = await anonymousClient.rpc(name, parameters)
+  if (!result.error || !['42501', 'PGRST202'].includes(result.error.code)) {
+    throw new Error(`익명 사용자의 ${name} SECURITY DEFINER RPC 실행이 차단되지 않았습니다.`)
+  }
+}
+for (const [name, parameters] of [
+  ['friend_activity', { p_user_id: signed.data.user.id }],
+  ['matchmaking_status_for', { p_user_id: signed.data.user.id }],
+  ['delete_card_set', { p_card_set_id: randomUUID() }],
+]) {
+  const result = await player.rpc(name, parameters)
+  if (!result.error || !['42501', 'PGRST202'].includes(result.error.code)) {
+    throw new Error(`인증 사용자의 내부 ${name} RPC 직접 실행이 차단되지 않았습니다.`)
+  }
+}
+
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 const subscribe = channel => new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error('Realtime 구독 시간 초과')), 8_000)
@@ -257,4 +279,4 @@ if (!secondRing.error || !secondRing.error.message.includes('game_action_rate_li
 const removedSecurityRoom = await admin.from('rooms').delete().eq('id', securityRoom.data.id)
 if (removedSecurityRoom.error) throw removedSecurityRoom.error
 
-console.log('verified strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, inactive-session Realtime denial and recovery, direct game-event denial, and server game-action rate limiting')
+console.log('verified anonymous and internal SECURITY DEFINER denial, strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, inactive-session Realtime denial and recovery, direct game-event denial, and server game-action rate limiting')

@@ -10,6 +10,7 @@
 | 개발 Redirect URL | 개발 도메인과 로컬 43127/43129 허용 | 운영은 `https://haligali.swonport.kr/recover**`처럼 필요한 경로만 허용 |
 | 이메일 로그인 | 활성 | 운영 SMTP와 발신 도메인 검증 필요 |
 | 커스텀 SMTP | 개발 프로젝트 미설정 | 공개 전 개발·운영 각각 설정하고 실제 수신 확인 |
+| 비밀번호 정책 | 개발 서버 최소 8자, UI 최소 8자 | 운영도 최소 8자 이상으로 맞추고 Pro 이상이면 HIBP 유출 비밀번호 차단 활성화 |
 | 전화번호 인증 | 개발 프로젝트 비활성 | SMS 공급자를 설정한 환경에서만 `VITE_PHONE_AUTH_ENABLED=true` 사용 |
 | 푸시 등록 | 인증 전용 RPC와 여러 기기 endpoint 저장 | HTTPS 개발 도메인과 실기기에서 수신 확인 |
 | PWA 아이콘 | 192/512 PNG, maskable, iOS 180 PNG | 기기 홈 화면에서 잘림 여부 확인 |
@@ -117,7 +118,8 @@ SMTP 설정값은 코드나 `.env.*`가 아니라 각 Supabase 프로젝트의 A
 - [ ] 운영 DB 백업/복구 지점 확인
 - [ ] 운영 Supabase에 마이그레이션을 파일 순서대로 적용
 - [ ] 운영 Edge Function 비밀값과 허용 Origin 확인 후 함수 배포
-- [ ] 운영 Auth Site URL, Redirect URL, SMTP, rate limit 확인
+- [ ] 운영 Auth Site URL, Redirect URL, SMTP, rate limit, 최소 비밀번호 8자 이상 확인
+- [ ] Pro 이상 플랜이면 Auth의 HIBP 유출 비밀번호 차단 활성화
 - [ ] Cloudflare 사용자/관리자 프로젝트에 각 운영 공개 변수 설정
 - [ ] `main` 빌드와 스모크 테스트 통과
 - [ ] 실제 기기 PWA/푸시 표 완료

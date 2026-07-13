@@ -50,6 +50,15 @@ await rpc(member, 'create_card_set', { p_name: '권한 위조', p_description: '
 
 const oldSets = await admin.from('card_sets').select('id').eq('space_id', space.id).like('name', '자동 카드%')
 if (oldSets.data?.length) {
+  for (const oldSet of oldSets.data) {
+    const listedAssets = await admin.storage.from('card-assets').list(oldSet.id, { limit: 1000 })
+    if (listedAssets.error) throw listedAssets.error
+    const oldAssetPaths = listedAssets.data.filter(item => item.id).map(item => `${oldSet.id}/${item.name}`)
+    if (oldAssetPaths.length) {
+      const removedAssets = await admin.storage.from('card-assets').remove(oldAssetPaths)
+      if (removedAssets.error) throw removedAssets.error
+    }
+  }
   await admin.from('rooms').update({ card_set_id: null }).in('card_set_id', oldSets.data.map(item => item.id))
   await admin.from('card_sets').delete().in('id', oldSets.data.map(item => item.id))
 }
@@ -85,6 +94,19 @@ if (restoredCleanup.error) throw restoredCleanup.error
 const assetPath = `${cardSet.id}/test-${Date.now()}.png`
 const upload = await manager.storage.from('card-assets').upload(assetPath, png, { contentType: 'image/png' })
 if (upload.error) throw upload.error
+const managerAssetList = await manager.storage.from('card-assets').list(cardSet.id, { limit: 100 })
+if (managerAssetList.error || !managerAssetList.data.some(item => item.name === assetPath.split('/').at(-1))) {
+  throw managerAssetList.error ?? new Error('카드 세트 관리자가 에셋 목록을 조회하지 못했습니다.')
+}
+const unrelatedAssetList = await outsider.storage.from('card-assets').list(cardSet.id, { limit: 100 })
+if (!unrelatedAssetList.error && unrelatedAssetList.data.some(item => item.name === assetPath.split('/').at(-1))) {
+  throw new Error('관련 없는 사용자가 카드 에셋 목록을 조회했습니다.')
+}
+const publicAssetUrl = manager.storage.from('card-assets').getPublicUrl(assetPath).data.publicUrl
+const publicAsset = await fetch(publicAssetUrl)
+if (!publicAsset.ok || publicAsset.headers.get('content-type') !== 'image/png') {
+  throw new Error(`공개 카드 이미지 URL 접근 실패 (${publicAsset.status})`)
+}
 const badUpload = await manager.storage.from('card-assets').upload(`${cardSet.id}/bad-${Date.now()}.txt`, new TextEncoder().encode('bad'), { contentType: 'text/plain' })
 if (!badUpload.error) throw new Error('허용되지 않은 카드 파일 형식 업로드됨')
 await manager.from('card_sets').update({ back_asset_path: assetPath }).eq('id', cardSet.id)
@@ -111,8 +133,10 @@ await deleteSet(cardSet.id, false)
 await admin.from('rooms').delete().eq('id', roomValue.id)
 await rpc(manager, 'unpublish_card_set', { p_card_set_id: cardSet.id })
 const deletedSet = await deleteSet(cardSet.id)
-if (deletedSet.data?.storageCleanupPending || deletedSet.data?.removedAssets !== 1) throw new Error('카드 세트 Storage 정리가 완료되지 않았습니다.')
+if (deletedSet.data?.storageCleanupPending || deletedSet.data?.removedAssets !== 1) {
+  throw new Error(`카드 세트 Storage 정리가 완료되지 않았습니다: ${JSON.stringify(deletedSet.data)}`)
+}
 const remainingAssets = await admin.storage.from('card-assets').list(cardSet.id, { limit: 100 })
 if (remainingAssets.error || remainingAssets.data.some(item => item.id)) throw remainingAssets.error ?? new Error('삭제된 카드 세트 파일이 Storage에 남았습니다.')
 
-console.log('verified active-manager storage enforcement, default 56-card set, draft isolation, image validation, v1/v2 publishing, cloning, deletion, room selection, and in-use protection')
+console.log('verified active-manager storage enforcement, non-enumerable public assets, default 56-card set, draft isolation, image validation, v1/v2 publishing, cloning, deletion, room selection, and in-use protection')
