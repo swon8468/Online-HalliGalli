@@ -11,7 +11,11 @@ export default function PasswordRecovery() {
   const navigate = useNavigate()
   const [method, setMethod] = useState<'email' | 'phone'>('email')
   const [step, setStep] = useState<'request' | 'verify' | 'password'>('request')
-  const recoveryHint = window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).get('type') === 'recovery' || new URLSearchParams(window.location.search).has('error_code')
+  const query = new URLSearchParams(window.location.search)
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const hasRecoveryToken = hash.get('type') === 'recovery' && Boolean(hash.get('access_token'))
+  const hasRecoveryCode = query.get('type') === 'recovery' && Boolean(query.get('code'))
+  const recoveryHint = hasRecoveryToken || hasRecoveryCode || query.get('type') === 'recovery' || query.has('error_code')
   const [recoveryLinkState, setRecoveryLinkState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>(recoveryHint ? 'checking' : 'idle')
   const [identifier, setIdentifier] = useState('')
   const [otp, setOtp] = useState('')
@@ -30,11 +34,11 @@ export default function PasswordRecovery() {
     const acceptRecovery = () => { completed = true; setRecoveryLinkState('valid'); setStep('password') }
     const { data } = supabase.auth.onAuthStateChange(event => { if (event === 'PASSWORD_RECOVERY') acceptRecovery() })
     void supabase.auth.getSession().then(({ data: session }) => {
-      if (session.session && recoveryHint) acceptRecovery()
+      if (session.session && (hasRecoveryToken || hasRecoveryCode)) acceptRecovery()
       else if (recoveryHint) invalidTimer = window.setTimeout(() => { if (!completed) setRecoveryLinkState('invalid') }, 1800)
     })
     return () => { data.subscription.unsubscribe(); window.clearTimeout(invalidTimer) }
-  }, [recoveryHint])
+  }, [hasRecoveryCode, hasRecoveryToken, recoveryHint])
 
   const requestRecovery = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setMessage('')
