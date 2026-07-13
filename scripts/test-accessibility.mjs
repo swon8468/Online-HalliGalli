@@ -21,7 +21,9 @@ for (const [file, source] of sources) {
   }
 }
 if (!sources.get('src/components/Layout.tsx')?.includes('<DialogFocusManager />')) throw new Error('전역 모달 포커스 관리자가 연결되지 않았습니다.')
-if (!sources.get('src/components/DialogFocusManager.tsx')?.includes("event.key !== 'Tab'")) throw new Error('모달 Tab 포커스 트랩이 없습니다.')
+const focusManager = sources.get('src/components/DialogFocusManager.tsx') ?? ''
+if (!focusManager.includes("event.key !== 'Tab'")) throw new Error('모달 Tab 포커스 트랩이 없습니다.')
+if (!focusManager.includes("event.key === 'Escape'") || !focusManager.includes('dismissControl(activeDialog)')) throw new Error('모달 Escape 닫기 처리가 없습니다.')
 const css = sources.get('src/styles.css') ?? ''
 for (const marker of [':focus-visible', '@media (pointer: coarse)', '@media (max-width: 360px)', '@media (prefers-reduced-motion: reduce)']) {
   if (!css.includes(marker)) throw new Error(`반응형/접근성 스타일 누락: ${marker}`)

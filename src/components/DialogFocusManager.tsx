@@ -16,6 +16,12 @@ function focusableElements(dialog: HTMLElement) {
   })
 }
 
+function dismissControl(dialog: HTMLElement) {
+  const explicit = dialog.querySelector<HTMLElement>('[data-dialog-dismiss]:not([disabled]), button[aria-label*="닫기"]:not([disabled])')
+  if (explicit) return explicit
+  return focusableElements(dialog).find(element => element instanceof HTMLButtonElement && ['취소', '계속 플레이'].includes(element.textContent?.trim() ?? '')) ?? null
+}
+
 /**
  * Applies one consistent keyboard focus policy to every aria-modal dialog.
  * This also covers dialogs rendered by individual feature pages without making
@@ -54,7 +60,13 @@ export default function DialogFocusManager() {
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!activeDialog || event.key !== 'Tab') return
+      if (!activeDialog) return
+      if (event.key === 'Escape') {
+        const dismiss = dismissControl(activeDialog)
+        if (dismiss) { event.preventDefault(); event.stopPropagation(); dismiss.click() }
+        return
+      }
+      if (event.key !== 'Tab') return
       const elements = focusableElements(activeDialog)
       if (!elements.length) { event.preventDefault(); activeDialog.focus(); return }
       const first = elements[0]

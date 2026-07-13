@@ -488,7 +488,7 @@ export default function Game() {
       </section>}
       {settingsOpen && <section className="game-settings-overlay" role="dialog" aria-modal="true" aria-labelledby="game-settings-title">
         <div className="game-settings-card">
-          <header><div><Settings /><span><small>GAME SETTINGS</small><h2 id="game-settings-title">게임 환경 설정</h2></span></div><button aria-label="게임 설정 닫기" onClick={() => setSettingsOpen(false)}><X /></button></header>
+          <header><div><Settings /><span><small>GAME SETTINGS</small><h2 id="game-settings-title">게임 환경 설정</h2></span></div><button data-dialog-dismiss aria-label="게임 설정 닫기" onClick={() => setSettingsOpen(false)}><X /></button></header>
           <label className="game-setting-toggle"><span><strong>효과음</strong><small>카드, 종, 판정 및 승패 효과음</small></span><input type="checkbox" checked={!settings.muted} onChange={event => setSettings(value => ({ ...value, muted: !event.target.checked }))} /></label>
           <label className="game-setting-range"><span><strong>음량</strong><output>{Math.round(settings.volume * 100)}%</output></span><input type="range" min="0" max="100" value={Math.round(settings.volume * 100)} disabled={settings.muted} onChange={event => setSettings(value => ({ ...value, volume: Number(event.target.value) / 100 }))} /></label>
           <label className="game-setting-toggle"><span><strong>진동</strong><small>지원 기기에서 종과 판정에 반응</small></span><input type="checkbox" checked={settings.vibration} onChange={event => setSettings(value => ({ ...value, vibration: event.target.checked }))} /></label>
@@ -498,7 +498,7 @@ export default function Game() {
         </div>
       </section>}
       {showExitConfirm && <section className="game-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="exit-game-title">
-        <div className="game-confirm-card"><LogOut /><h2 id="exit-game-title">게임에서 나갈까요?</h2><p>{isBotMode ? '현재 연습 기록은 저장되지 않아요.' : state.phase === 'finished' ? '게임 결과는 저장되어 있어요.' : '진행 중 나가면 기권 처리되고 남은 플레이어가 게임을 이어갑니다.'}</p><div><button className="secondary-button" onClick={() => setShowExitConfirm(false)}>계속 플레이</button><button className="danger-button" onClick={() => void exitGame()} disabled={busy}>게임 나가기</button></div></div>
+        <div className="game-confirm-card"><LogOut /><h2 id="exit-game-title">게임에서 나갈까요?</h2><p>{isBotMode ? '현재 연습 기록은 저장되지 않아요.' : state.phase === 'finished' ? '게임 결과는 저장되어 있어요.' : '진행 중 나가면 기권 처리되고 남은 플레이어가 게임을 이어갑니다.'}</p><div><button data-dialog-dismiss className="secondary-button" onClick={() => setShowExitConfirm(false)}>계속 플레이</button><button className="danger-button" onClick={() => void exitGame()} disabled={busy}>게임 나가기</button></div></div>
       </section>}
     </div>
   )

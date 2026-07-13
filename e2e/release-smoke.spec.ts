@@ -65,6 +65,26 @@ test('봇 연습에서 카드 한 장을 순서대로 뒤집을 수 있다', asy
   expect(errors).toEqual([])
 })
 
+test('게임 설정 모달은 키보드 포커스를 가두고 Escape 후 원래 버튼으로 돌아간다', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', '키보드 포커스 흐름은 한 브라우저 엔진에서 한 번만 검증합니다.')
+  const errors = watchRuntimeErrors(page)
+  await page.goto('/game?mode=bot&difficulty=normal')
+  const trigger = page.getByRole('button', { name: '게임 설정' })
+  await trigger.click()
+  const dialog = page.getByRole('dialog', { name: '게임 환경 설정' })
+  const close = dialog.getByRole('button', { name: '게임 설정 닫기' })
+  const done = dialog.getByRole('button', { name: '완료' })
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(done).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  expect(errors).toEqual([])
+})
+
 test('봇 오답은 즉시 안내되고 벌칙 카드가 플레이어에게 이동한다', async ({ page }) => {
   const errors = watchRuntimeErrors(page)
   await page.addInitScript(() => { Math.random = () => 0.5 })
