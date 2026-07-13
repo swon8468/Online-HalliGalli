@@ -23,6 +23,31 @@ export interface GamePlayerInfo {
   isCurrentTurn: boolean
 }
 
+export type GameFruit = 'strawberry' | 'banana' | 'lime' | 'plum'
+
+export interface GameTableCard {
+  userId: string
+  fruit: GameFruit
+  count: number
+}
+
+export interface GameSnapshot {
+  phase: 'playing' | 'finished'
+  round: number
+  version: number
+  currentTurn: string
+  table: GameTableCard[]
+  fruitTotals: Record<GameFruit, number>
+  bellActive: boolean
+  winnerId: string | null
+  lastResult?: { type: 'reveal' | 'ring'; userId: string; correct: boolean | null; fruit: GameFruit | null; count: number | null } | null
+}
+
+export interface GameView {
+  state: GameSnapshot
+  players: GamePlayerInfo[]
+}
+
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase가 설정되지 않았습니다.')
   return supabase
@@ -94,6 +119,46 @@ export async function loadGamePlayers(gameId: string): Promise<GamePlayerInfo[]>
     const profile = Array.isArray(player.profiles) ? player.profiles[0] : player.profiles
     return { userId: player.user_id, nickname: profile?.nickname ?? '플레이어', seat: player.seat, cardCount: player.card_count, isCurrentTurn: player.user_id === game.current_turn }
   })
+}
+
+export async function loadGameView(gameId: string): Promise<GameView> {
+  const client = requireSupabase()
+  const [{ data: game, error: gameError }, { data: players, error: playersError }] = await Promise.all([
+    client.from('games').select('state,current_turn,version').eq('id', gameId).single(),
+    client.from('game_players').select('user_id,seat,card_count,profiles(nickname)').eq('game_id', gameId).order('seat'),
+  ])
+  if (gameError) throw gameError
+  if (playersError) throw playersError
+  const state = game.state as GameSnapshot
+  return {
+    state: { ...state, currentTurn: game.current_turn, version: game.version },
+    players: (players ?? []).map(player => {
+      const profile = Array.isArray(player.profiles) ? player.profiles[0] : player.profiles
+      return { userId: player.user_id, nickname: profile?.nickname ?? '플레이어', seat: player.seat, cardCount: player.card_count, isCurrentTurn: player.user_id === game.current_turn }
+    }),
+  }
+}
+
+export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
+  const { data, error } = await requireSupabase().rpc('reveal_game_card', { p_game_id: gameId })
+  if (error) throw error
+  return data as GameSnapshot
+}
+
+export async function ringGameBell(gameId: string) {
+  const { data, error } = await requireSupabase().rpc('attempt_ring', { p_game_id: gameId })
+  if (error) throw error
+  return data as { accepted: boolean; correct?: boolean; reason?: string; state: GameSnapshot }
+}
+
+export function subscribeToGame(gameId: string, onChange: () => void) {
+  const client = supabase
+  if (!client) return () => undefined
+  const channel = client.channel(`game:${gameId}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, onChange)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, onChange)
+    .subscribe()
+  return () => { void client.removeChannel(channel) }
 }
 
 export function subscribeToRoom(roomId: string, onChange: () => void) {

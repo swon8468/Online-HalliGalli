@@ -15,6 +15,7 @@
     "test-users:seed": "node scripts/seed-test-users.mjs",
     "test-room:join": "node scripts/join-test-room.mjs",
     "test-room:verify": "node scripts/verify-test-room.mjs",
+    "test-game:engine": "node scripts/test-game-engine.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
