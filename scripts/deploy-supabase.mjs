@@ -41,4 +41,7 @@ run(['functions', 'deploy', 'bootstrap-super-admin', '--project-ref', projectRef
 run(['functions', 'deploy', 'send-push', '--project-ref', projectRef, '--use-api'])
 run(['functions', 'deploy', 'admin-actions', '--project-ref', projectRef, '--use-api'])
 run(['functions', 'deploy', 'check-identifier', '--project-ref', projectRef, '--no-verify-jwt', '--use-api'])
+run(['functions', 'deploy', 'delete-account', '--project-ref', projectRef, '--use-api'])
+run(['functions', 'deploy', 'space-admin', '--project-ref', projectRef, '--use-api'])
+run(['functions', 'deploy', 'delete-card-set', '--project-ref', projectRef, '--use-api'])
 console.log(`${environment}: Supabase deployment complete`)

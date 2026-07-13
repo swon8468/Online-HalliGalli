@@ -1,45 +1,110 @@
 import { Check, LoaderCircle, Radio, UserRound, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
+import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus } from '../lib/matchmaking'
+
+const idleStatus: MatchmakingStatus = { status: 'idle', queueCount: 0, members: [] }
+
+function matchingError(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  if (message.includes('active room or game')) return '이미 참여 중인 방이나 게임이 있어요.'
+  if (message.includes('match already created')) return '이미 매칭이 완료되어 게임으로 이동합니다.'
+  if (message.includes('invalid player count')) return '2명부터 6명까지 선택해 주세요.'
+  return message || '매칭 상태를 처리하지 못했습니다.'
+}
 
 export default function Online() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [count, setCount] = useState(4)
-  const [searching, setSearching] = useState(false)
-  const [found, setFound] = useState(1)
+  const [status, setStatus] = useState<MatchmakingStatus>(idleStatus)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [onlineCount, setOnlineCount] = useState(1)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    if (!searching || found >= count) return
-    const timer = window.setTimeout(() => setFound(value => value + 1), 1200)
-    return () => window.clearTimeout(timer)
-  }, [searching, found, count])
-
-  useEffect(() => {
-    if (searching && found === count) {
-      const timer = window.setTimeout(() => navigate('/game'), 900)
-      return () => window.clearTimeout(timer)
+  const applyStatus = useCallback((next: MatchmakingStatus) => {
+    setStatus(next)
+    if (next.playerCount) setCount(next.playerCount)
+    if (next.status === 'matched' && next.gameId) {
+      navigate(`/game?game=${encodeURIComponent(next.gameId)}`, { replace: true })
     }
-  }, [searching, found, count, navigate])
+  }, [navigate])
 
-  if (searching) {
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    const refresh = async () => {
+      try {
+        const next = await getMatchmakingStatus()
+        if (active) applyStatus(next)
+      } catch (caught) {
+        if (active) setError(matchingError(caught))
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void refresh()
+    const unsubscribeQueue = subscribeToMatchmaking(user.id, () => void refresh())
+    const unsubscribePresence = subscribeToOnlinePresence(user.id, value => active && setOnlineCount(value))
+    return () => { active = false; unsubscribeQueue(); unsubscribePresence() }
+  }, [applyStatus, user])
+
+  useEffect(() => {
+    if (status.status !== 'waiting') return
+    const pulse = async () => {
+      try { applyStatus(await heartbeatMatchmaking()) }
+      catch (caught) { setError(matchingError(caught)) }
+    }
+    const timer = window.setInterval(() => void pulse(), 10_000)
+    const reconnect = () => void pulse()
+    window.addEventListener('online', reconnect)
+    return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect) }
+  }, [applyStatus, status.status])
+
+  const start = async () => {
+    setBusy(true)
+    setError('')
+    try { applyStatus(await joinMatchmaking(count)) }
+    catch (caught) { setError(matchingError(caught)) }
+    finally { setBusy(false); setLoading(false) }
+  }
+
+  const cancel = async () => {
+    setBusy(true)
+    setError('')
+    try { applyStatus(await cancelMatchmaking()) }
+    catch (caught) {
+      setError(matchingError(caught))
+      try { applyStatus(await getMatchmakingStatus()) } catch { /* keep the original error */ }
+    } finally { setBusy(false) }
+  }
+
+  if (status.status === 'waiting' || status.status === 'matched') {
+    const selectedCount = status.playerCount ?? count
+    const found = Math.min(status.queueCount, selectedCount)
     return (
       <div className="content-page narrow-page matching-page play-flow-page">
-        <button className="match-close" onClick={() => { setSearching(false); setFound(1) }} aria-label="매칭 취소"><X /></button>
+        <button className="match-close" onClick={() => void cancel()} disabled={busy || status.status === 'matched'} aria-label="매칭 취소"><X /></button>
         <div className="radar" aria-hidden="true"><i /><i /><i /><span><Radio /></span></div>
         <p className="eyebrow">QUICK MATCH</p>
-        <h1>{found === count ? '모두 모였어요.' : '플레이어를 찾고 있어요.'}</h1>
-        <p>{found === count ? '게임을 곧 시작할게요.' : '잠시만 기다려 주세요.'}</p>
+        <h1>{status.status === 'matched' ? '모두 모였어요.' : '플레이어를 찾고 있어요.'}</h1>
+        <p>{status.status === 'matched' ? '게임으로 이동하고 있어요.' : '새로고침해도 대기 상태가 유지됩니다.'}</p>
         <div className="match-slots">
-          {Array.from({ length: count }, (_, index) => (
-            <div className={index < found ? 'match-slot is-found' : 'match-slot'} key={index}>
-              {index < found ? (index === 0 ? <UserRound /> : <Check />) : <LoaderCircle />}
-              <span>{index === 0 ? '나' : index < found ? `플레이어 ${index + 1}` : '검색 중'}</span>
+          {Array.from({ length: selectedCount }, (_, index) => {
+            const member = status.members[index]
+            const isFound = status.status === 'matched' ? Boolean(member) : index < found
+            return <div className={isFound ? 'match-slot is-found' : 'match-slot'} key={index}>
+              {isFound ? (index === 0 ? <UserRound /> : <Check />) : <LoaderCircle />}
+              <span>{member?.nickname ?? (index === 0 ? '나' : isFound ? `대기 중인 플레이어 ${index + 1}` : '검색 중')}</span>
             </div>
-          ))}
+          })}
         </div>
-        <strong className="match-count">{found} / {count}</strong>
-        <button className="secondary-button" onClick={() => { setSearching(false); setFound(1) }}>매칭 취소</button>
+        <strong className="match-count">{found} / {selectedCount}</strong>
+        {error && <p className="form-error match-error" role="alert">{error}</p>}
+        <button className="secondary-button" onClick={() => void cancel()} disabled={busy || status.status === 'matched'}>{busy ? '취소하는 중...' : '매칭 취소'}</button>
       </div>
     )
   }
@@ -49,10 +114,11 @@ export default function Online() {
       <PageHeader eyebrow="QUICK MATCH" title="몇 명이서 플레이할까요?" description="원하는 인원을 선택하면 바로 매칭해 드려요." />
       <section className="form-card online-card">
         <div className="count-options">
-          {[2, 3, 4, 5, 6].map(value => <button className={count === value ? 'is-selected' : ''} onClick={() => setCount(value)} key={value}><strong>{value}</strong><span>명</span>{count === value && <Check />}</button>)}
+          {[2, 3, 4, 5, 6].map(value => <button className={count === value ? 'is-selected' : ''} onClick={() => setCount(value)} disabled={loading || busy} key={value}><strong>{value}</strong><span>명</span>{count === value && <Check />}</button>)}
         </div>
-        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>평균 대기 시간 약 10초</small></span><i>빠름</i></div>
-        <button className="primary-button full-button" onClick={() => setSearching(true)}>매칭 시작</button>
+        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>현재 온라인 {onlineCount}명 · 실제 접속 상태</small></span><i>LIVE</i></div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="primary-button full-button" onClick={() => void start()} disabled={loading || busy}>{loading ? '대기열 확인 중...' : busy ? '참가하는 중...' : '매칭 시작'}</button>
       </section>
     </div>
   )

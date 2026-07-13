@@ -4,6 +4,8 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { translateAuthError } from '../lib/authErrors'
+import { phoneAuthEnabled } from '../lib/environment'
 
 export default function Auth() {
   const { user, signIn, signUp } = useAuth()
@@ -18,8 +20,10 @@ export default function Auth() {
   const [duplicateStatus, setDuplicateStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
   const [identifierError, setIdentifierError] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const next = searchParams.get('next') || '/'
+  const requestedNext = searchParams.get('next')
+  const next = requestedNext?.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : '/'
 
   if (user) return <Navigate to={next} replace />
 
@@ -33,13 +37,19 @@ export default function Auth() {
       return
     }
     setSubmitting(true)
-    setError('')
+    setError(''); setNotice('')
     try {
-      if (mode === 'signup') await signUp(identifier, password, nickname.trim())
-      else await signIn(identifier, password)
+      if (mode === 'signup') {
+        const result = await signUp(identifier, password, nickname.trim())
+        if (result.requiresVerification) {
+          setNotice(method === 'email' ? '가입 확인 메일을 보냈어요. 이메일 인증 후 로그인해 주세요.' : '가입 확인 문자를 보냈어요. 전화번호 인증 후 로그인해 주세요.')
+          setMode('signin'); setPassword(''); setPasswordConfirm(''); setDuplicateStatus('idle')
+          return
+        }
+      } else await signIn(identifier, password)
       navigate(next, { replace: true })
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '계정 정보를 확인해 주세요.')
+      setError(translateAuthError(caught))
     } finally {
       setSubmitting(false)
     }
@@ -68,6 +78,7 @@ export default function Auth() {
     setDuplicateStatus('idle')
     setIdentifierError('')
     setError('')
+    setNotice('')
   }
 
   return (
@@ -75,7 +86,7 @@ export default function Auth() {
       <PageHeader eyebrow="PLAYER ACCOUNT" title={mode === 'signin' ? '게임을 시작하려면 로그인하세요.' : '플레이어 계정을 만들어요.'} description="방 만들기, 참여하기, 온라인 매칭은 계정이 필요해요." />
       <form className="form-card auth-card" onSubmit={submit}>
         {!isSupabaseConfigured && <div className="demo-notice"><ShieldCheck /> 개발용 데모 인증이 활성화되어 있어요.</div>}
-        <div className="auth-tabs"><button type="button" className={mode === 'signin' ? 'is-active' : ''} onClick={() => { setMode('signin'); setIdentifierError('') }}>로그인</button><button type="button" className={mode === 'signup' ? 'is-active' : ''} onClick={() => { setMode('signup'); setDuplicateStatus('idle'); setIdentifierError('') }}>가입하기</button></div>
+        <div className="auth-tabs"><button type="button" className={mode === 'signin' ? 'is-active' : ''} onClick={() => { setMode('signin'); setIdentifierError(''); setNotice('') }}>로그인</button><button type="button" className={mode === 'signup' ? 'is-active' : ''} onClick={() => { setMode('signup'); setDuplicateStatus('idle'); setIdentifierError(''); setNotice('') }}>가입하기</button></div>
         {mode === 'signup' && <label><span><UserRound /> 닉네임</span><input value={nickname} onChange={event => setNickname(event.target.value.slice(0, 12))} placeholder="게임에서 사용할 이름" required /></label>}
         <div className="auth-field">
           <label htmlFor="auth-identifier"><span>{method === 'email' ? <AtSign /> : <Phone />}{method === 'email' ? '이메일' : '전화번호'}</span></label>
@@ -88,9 +99,11 @@ export default function Auth() {
         </div>
         <label><span><LockKeyhole /> 비밀번호</span><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="8자 이상" minLength={8} required /></label>
         {mode === 'signup' && <label><span><LockKeyhole /> 비밀번호 확인</span><input type="password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} placeholder="비밀번호를 다시 입력" minLength={8} required /></label>}
+        {notice && <p className="field-message field-message--success auth-notice" role="status">{notice}</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button full-button" disabled={submitting}>{submitting ? '확인 중...' : mode === 'signin' ? '로그인' : '계정 만들기'} <ArrowRight /></button>
-        <button type="button" className="method-switch" onClick={switchMethod}>{method === 'email' ? '전화번호' : '이메일'}로 {mode === 'signin' ? '로그인하기' : '가입하기'}</button>
+        {mode === 'signin' && <button type="button" className="method-switch" onClick={() => navigate('/recover')}>비밀번호를 잊으셨나요?</button>}
+        {phoneAuthEnabled && <button type="button" className="method-switch" onClick={switchMethod}>{method === 'email' ? '전화번호' : '이메일'}로 {mode === 'signin' ? '로그인하기' : '가입하기'}</button>}
       </form>
     </div>
   )

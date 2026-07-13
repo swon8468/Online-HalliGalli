@@ -1,0 +1,48 @@
+import { expect, test, type Page } from '@playwright/test'
+import { accounts, connectedEnvironment } from './fixture'
+
+async function login(page: Page, email: string, password: string) {
+  await page.goto('/auth')
+  await page.getByLabel('이메일').fill(email)
+  await page.getByLabel('비밀번호').fill(password)
+  await page.locator('form').getByRole('button', { name: '로그인', exact: true }).last().click()
+  await expect(page).toHaveURL('/')
+}
+
+test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임 시작을 동기화한다', async ({ browser }) => {
+  const { password } = await connectedEnvironment()
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+  const runtimeErrors: string[] = []
+  for (const page of [host, guest]) page.on('pageerror', error => runtimeErrors.push(error.message))
+
+  try {
+    await Promise.all([login(host, accounts[0].email, password), login(guest, accounts[1].email, password)])
+    await host.goto('/create')
+    await host.getByRole('button', { name: '방 만들기', exact: true }).click()
+    await expect(host).toHaveURL(/\/room\/[0-9a-f-]+$/)
+    const code = (await host.locator('.room-code').innerText()).replace(/\s/g, '')
+    expect(code).toMatch(/^[A-Z]{3}[0-9]{3}$/)
+
+    await guest.goto(`/join?code=${code}`)
+    await guest.getByRole('button', { name: /방 참여하기/ }).click()
+    await expect(guest).toHaveURL(/\/room\/[0-9a-f-]+$/)
+    await expect(host.getByText('E2E참가자', { exact: false })).toBeVisible()
+    await guest.getByRole('button', { name: '준비하기' }).click()
+    await expect(guest.getByRole('button', { name: /준비 완료/ })).toBeVisible()
+
+    const start = host.getByRole('button', { name: '게임 시작', exact: true })
+    await expect(start).toBeEnabled()
+    await start.click()
+    await expect(host).toHaveURL(/\/game\?game=[0-9a-f-]+$/)
+    await expect(guest).toHaveURL(/\/game\?game=[0-9a-f-]+$/)
+    await expect(host.getByText('LIVE GAME')).toBeVisible()
+    await expect(guest.getByText('LIVE GAME')).toBeVisible()
+    expect(new URL(await host.url()).searchParams.get('game')).toBe(new URL(await guest.url()).searchParams.get('game'))
+    expect(runtimeErrors).toEqual([])
+  } finally {
+    await hostContext.close(); await guestContext.close()
+  }
+})

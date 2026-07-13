@@ -16,8 +16,44 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare non-secret build configuration
+        run: |
+          cp .env.development.example .env.development
+          cp .env.production.example .env.production
       - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run test:e2e
       - run: npm run build:develop
-        if: github.ref != 'refs/heads/main'
+      - run: npm run test-pwa
       - run: npm run build
-        if: github.ref == 'refs/heads/main'
+
+  integration:
+    if: ${{ vars.RUN_SUPABASE_INTEGRATION == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare development integration configuration
+        env:
+          SUPABASE_URL: ${{ secrets.DEVELOP_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.DEVELOP_SUPABASE_ANON_KEY }}
+        run: |
+          printf '%s\n' \
+            'VITE_APP_ENV=development' \
+            'VITE_PUBLIC_APP_URL=https://develop.haligali.swonport.kr' \
+            'VITE_ADMIN_APP_URL=https://develop.admin.haligali.swonport.kr' \
+            "VITE_SUPABASE_URL=$SUPABASE_URL" \
+            "VITE_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" \
+            "SUPABASE_ACCESS_TOKEN=$SUPABASE_ACCESS_TOKEN" > .env.development
+      - run: npm run test:integration
+      - run: npm run test:e2e:connected

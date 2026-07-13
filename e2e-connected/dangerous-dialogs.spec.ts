@@ -1,0 +1,58 @@
+import { expect, test, type Page } from '@playwright/test'
+import { accounts, connectedEnvironment } from './fixture'
+
+async function login(page: Page) {
+  const { password } = await connectedEnvironment()
+  await page.goto('/auth')
+  await page.getByLabel('이메일').fill(accounts[0].email)
+  await page.getByLabel('비밀번호').fill(password)
+  await page.locator('form').getByRole('button', { name: '로그인', exact: true }).last().click()
+  await expect(page).toHaveURL('/')
+}
+
+test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page }) => {
+  await login(page)
+  await page.goto('/spaces')
+  await page.getByRole('button', { name: '스페이스 생성', exact: true }).click()
+  const createSpace = page.getByRole('dialog', { name: '스페이스 생성' })
+  await createSpace.getByLabel('이름').fill('E2E 릴리스 단체')
+  await createSpace.getByRole('textbox', { name: 'Slug', exact: true }).fill('e2e-release-space')
+  await createSpace.getByLabel('설명').fill('위험 작업 모달 자동 검증')
+  await createSpace.getByRole('button', { name: '생성', exact: true }).click()
+  await expect(page).toHaveURL('/spaces/e2e-release-space/admin', { timeout: 15_000 })
+
+  await page.getByRole('button', { name: '설정', exact: true }).click()
+  await page.getByRole('button', { name: '스페이스 비활성화' }).click()
+  const archiveDialog = page.getByRole('dialog', { name: '스페이스를 비활성화할까요?' })
+  await expect(archiveDialog).toBeVisible()
+  await archiveDialog.getByRole('button', { name: '취소' }).click()
+  await expect(archiveDialog).toBeHidden()
+
+  await page.getByRole('button', { name: '멤버', exact: true }).click()
+  await page.getByRole('button', { name: '멤버 추가' }).click()
+  const memberDialog = page.getByRole('dialog', { name: '멤버 추가' })
+  await memberDialog.getByLabel('이메일').fill(accounts[1].email)
+  await memberDialog.getByRole('button', { name: '추가', exact: true }).click()
+  const guestRow = page.locator('.space-member-row').filter({ hasText: accounts[1].nickname })
+  await expect(guestRow).toBeVisible()
+  await guestRow.getByRole('button', { name: `${accounts[1].nickname} 삭제` }).click()
+  const memberDelete = page.getByRole('dialog', { name: '멤버를 삭제할까요?' })
+  await expect(memberDelete).toContainText(accounts[1].nickname)
+  await memberDelete.getByRole('button', { name: '취소' }).click()
+
+  await page.goto('/cards')
+  await page.getByRole('button', { name: '새 카드 세트' }).click()
+  const createCard = page.getByRole('dialog', { name: '새 카드 세트' })
+  await createCard.getByLabel('이름').fill('E2E 삭제 확인 카드')
+  await createCard.getByRole('button', { name: '생성', exact: true }).click()
+  const card = page.locator('article').filter({ hasText: 'E2E 삭제 확인 카드' })
+  await expect(card).toBeVisible()
+  await card.getByRole('button', { name: '삭제' }).click()
+  const cardDelete = page.getByRole('dialog', { name: '카드 세트를 삭제할까요?' })
+  await expect(cardDelete).toContainText('E2E 삭제 확인 카드')
+  await cardDelete.getByRole('button', { name: '취소' }).click()
+  await expect(card).toBeVisible()
+  await card.getByRole('button', { name: '삭제' }).click()
+  await page.getByRole('dialog', { name: '카드 세트를 삭제할까요?' }).getByRole('button', { name: '삭제하기' }).click()
+  await expect(card).toBeHidden()
+})

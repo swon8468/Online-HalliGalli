@@ -24,6 +24,8 @@ if (created.error) throw created.error
 const room = Array.isArray(created.data) ? created.data[0] : created.data
 const joined = await user2.rpc('join_private_room', { p_code: room.code })
 if (joined.error) throw joined.error
+const ready = await user2.rpc('set_room_ready', { p_room_id: room.id, p_ready: true })
+if (ready.error) throw ready.error
 const started = await user1.rpc('start_room_game', { p_room_id: room.id })
 if (started.error) throw started.error
 const gameId = started.data

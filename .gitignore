@@ -9,3 +9,7 @@ dist
 *.tsbuildinfo
 .vite
 supabase/.temp/
+supabase/.branches/
+playwright-report/
+test-results/
+blob-report/

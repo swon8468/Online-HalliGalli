@@ -1,16 +1,32 @@
-import { ArrowRight, BookOpen, Bot, DoorOpen, Radio, Sparkles } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { ArrowRight, BookOpen, Bot, Building2, DoorOpen, Radio, Sparkles } from 'lucide-react'
+import { useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 import { Fruit } from '../components/Fruit'
+import { findMyActiveSession } from '../lib/rooms'
 
 const menuItems = [
   { to: '/create', icon: Sparkles, title: '방 만들기', copy: '친구들을 초대하고 바로 시작하세요.', tone: 'blue' },
   { to: '/join', icon: DoorOpen, title: '방 참여하기', copy: '6자리 초대 코드로 입장하세요.', tone: 'dark' },
   { to: '/online', icon: Radio, title: '온라인', copy: '새로운 플레이어와 빠르게 매칭하세요.', tone: 'light' },
   { to: '/rules', icon: BookOpen, title: '게임 룰', copy: '종을 울리는 완벽한 순간을 알아보세요.', tone: 'light' },
-  { to: '/practice', icon: Bot, title: '봇 연습', copy: '혼자서 규칙과 타이밍을 연습하세요.', tone: 'practice' },
+  { to: '/practice', icon: Bot, title: '봇 연습', copy: '혼자서 규칙과 타이밍을 연습하세요.', tone: 'light' },
+  { to: '/spaces', icon: Building2, title: '스페이스', copy: '단체·행사 전용 공간을 관리하세요.', tone: 'light' },
 ] as const
 
 export default function Home() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    void findMyActiveSession().then(session => {
+      if (!active || !session) return
+      navigate(session.type === 'game' ? `/game?game=${encodeURIComponent(session.gameId)}` : `/room/${encodeURIComponent(session.roomId)}`, { replace: true })
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [navigate, user])
+
   return (
     <div className="home-page">
       <section className="hero">
