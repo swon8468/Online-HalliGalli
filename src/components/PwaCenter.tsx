@@ -1,5 +1,5 @@
 import { Download, RefreshCw, Share, Wifi, WifiOff, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -22,16 +22,30 @@ export default function PwaCenter() {
   const [iosHelp, setIosHelp] = useState(false)
   const [installStatus, setInstallStatus] = useState('')
   const [installDismissed, setInstallDismissed] = useState(() => localStorage.getItem('halli-galli:pwa-install-dismissed') === '1')
+  const restoredTimer = useRef<number | null>(null)
+  const offlineReadyTimer = useRef<number | null>(null)
   const standalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone))
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
 
   useEffect(() => {
     const beforeInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPromptEvent) }
     const installed = () => { setInstallPrompt(null); setInstallDismissed(true) }
-    const wentOffline = () => { setOnline(false); setRestored(false) }
-    const cameOnline = () => { setOnline(true); setRestored(true); window.setTimeout(() => setRestored(false), 3500) }
+    const wentOffline = () => {
+      if (restoredTimer.current !== null) window.clearTimeout(restoredTimer.current)
+      restoredTimer.current = null
+      setOnline(false); setRestored(false)
+    }
+    const cameOnline = () => {
+      if (restoredTimer.current !== null) window.clearTimeout(restoredTimer.current)
+      setOnline(true); setRestored(true)
+      restoredTimer.current = window.setTimeout(() => { restoredTimer.current = null; setRestored(false) }, 3500)
+    }
     const needsRefresh = () => setUpdateReady(true)
-    const cacheReady = () => { setOfflineReady(true); window.setTimeout(() => setOfflineReady(false), 3500) }
+    const cacheReady = () => {
+      if (offlineReadyTimer.current !== null) window.clearTimeout(offlineReadyTimer.current)
+      setOfflineReady(true)
+      offlineReadyTimer.current = window.setTimeout(() => { offlineReadyTimer.current = null; setOfflineReady(false) }, 3500)
+    }
     window.addEventListener('beforeinstallprompt', beforeInstall)
     window.addEventListener('appinstalled', installed)
     window.addEventListener('offline', wentOffline)
@@ -42,6 +56,8 @@ export default function PwaCenter() {
       window.removeEventListener('beforeinstallprompt', beforeInstall); window.removeEventListener('appinstalled', installed)
       window.removeEventListener('offline', wentOffline); window.removeEventListener('online', cameOnline)
       window.removeEventListener('halli-galli:pwa-update', needsRefresh); window.removeEventListener('halli-galli:pwa-offline-ready', cacheReady)
+      if (restoredTimer.current !== null) window.clearTimeout(restoredTimer.current)
+      if (offlineReadyTimer.current !== null) window.clearTimeout(offlineReadyTimer.current)
     }
   }, [])
 
