@@ -10,19 +10,34 @@ export function useSessionHeartbeat(kind: 'room' | 'game', id: string | null | u
   useEffect(() => {
     if (!id) return
     let active = true
-    const pulse = async () => {
-      if (!navigator.onLine) { if (active) { setOnline(false); setServerConnected(false) }; return }
+    let pulsePromise: Promise<boolean> | null = null
+    let reconcilePromise: Promise<void> | null = null
+    const runPulse = async () => {
+      if (!navigator.onLine) { if (active) { setOnline(false); setServerConnected(false) }; return false }
       try {
         if (kind === 'game') await heartbeatGameSession(id)
         else await heartbeatRoomSession(id)
         if (active) { setOnline(true); setServerConnected(true) }
+        return true
       } catch {
         if (active) setServerConnected(false)
+        return false
       }
     }
-    const reconnect = () => { setOnline(true); void pulse().then(() => reconnectRef.current?.()) }
+    const pulse = () => {
+      if (pulsePromise) return pulsePromise
+      pulsePromise = runPulse().finally(() => { pulsePromise = null })
+      return pulsePromise
+    }
+    const reconcile = () => {
+      if (reconcilePromise) return
+      reconcilePromise = pulse()
+        .then(connected => { if (connected && active) reconnectRef.current?.() })
+        .finally(() => { reconcilePromise = null })
+    }
+    const reconnect = () => { setOnline(true); reconcile() }
     const disconnect = () => { setOnline(false); setServerConnected(false) }
-    const visible = () => { if (document.visibilityState === 'visible') void pulse().then(() => reconnectRef.current?.()) }
+    const visible = () => { if (document.visibilityState === 'visible') reconcile() }
     const pageHide = () => {
       if (kind === 'game') void markGameSessionDisconnected(id)
       else void markRoomSessionDisconnected(id)

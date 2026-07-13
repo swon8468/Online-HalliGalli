@@ -31,6 +31,33 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     const code = (await host.locator('.room-code').innerText()).replace(/\s/g, '')
     expect(code).toMatch(/^[A-Z]{3}[0-9]{3}$/)
 
+    let heartbeatRequests = 0
+    await host.route('**/rest/v1/rpc/heartbeat_room_session', async route => {
+      heartbeatRequests += 1
+      await new Promise(resolve => setTimeout(resolve, 250))
+      await route.continue()
+    })
+    await host.evaluate(() => {
+      window.dispatchEvent(new Event('online'))
+      window.dispatchEvent(new Event('online'))
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await expect.poll(() => heartbeatRequests).toBe(1)
+    await host.waitForTimeout(350)
+    expect(heartbeatRequests).toBe(1)
+    await host.unroute('**/rest/v1/rpc/heartbeat_room_session')
+
+    await host.route('**/rest/v1/rpc/heartbeat_room_session', route => route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'temporary heartbeat failure' }),
+    }))
+    await host.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect(host.locator('.connection-banner')).toBeVisible()
+    await host.unroute('**/rest/v1/rpc/heartbeat_room_session')
+    await host.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect(host.locator('.connection-banner')).toHaveCount(0)
+
     await host.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new DOMException('denied', 'NotAllowedError') } } })
       Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
@@ -43,14 +70,14 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('취소 후 복사하면 안 됩니다.') } } })
     })
     await host.getByRole('button', { name: /초대 링크 공유/ }).click()
-    await expect(host.getByRole('status')).toContainText('공유를 취소했어요.')
+    await expect(host.locator('.friends-notice')).toHaveText('공유를 취소했어요.')
 
     await host.evaluate(() => {
       Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } })
     })
     await host.getByRole('button', { name: /초대 링크 공유/ }).click()
-    await expect(host.getByRole('status')).toContainText('초대 링크를 복사했어요.')
+    await expect(host.locator('.friends-notice')).toHaveText('초대 링크를 복사했어요.')
 
     await guest.goto(`/join?code=${code}`)
     await guest.getByRole('button', { name: /방 참여하기/ }).click()
