@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader'
 import { translateAuthError } from '../lib/authErrors'
 import { supabase } from '../lib/supabase'
 import { phoneAuthEnabled } from '../lib/environment'
+import { clearRecoveryRequestReceipt, recoveryRequestIsCoolingDown, saveRecoveryRequestReceipt } from '../lib/recoveryRequest'
 
 export default function PasswordRecovery() {
   const navigate = useNavigate()
@@ -41,14 +42,13 @@ export default function PasswordRecovery() {
       if (!supabase) throw new Error('Supabase가 설정되지 않았습니다.')
       if (method === 'email') {
         const email = identifier.trim().toLowerCase()
-        const requestedAt = Number(sessionStorage.getItem('halli-galli:recovery-requested-at') ?? 0)
-        if (Date.now() - requestedAt < 60_000) {
+        if (recoveryRequestIsCoolingDown(email)) {
           navigate('/recover/sent', { replace: true, state: { method: 'email', identifier: email } })
           return
         }
         const { error: requestError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/recover?type=recovery` })
         if (requestError) throw requestError
-        sessionStorage.setItem('halli-galli:recovery-requested-at', String(Date.now()))
+        saveRecoveryRequestReceipt(email)
         navigate('/recover/sent', {
           replace: true,
           state: { method: 'email', identifier: email },
@@ -82,7 +82,7 @@ export default function PasswordRecovery() {
       const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) throw updateError
       await supabase.auth.signOut()
-      sessionStorage.removeItem('halli-galli:recovery-requested-at')
+      clearRecoveryRequestReceipt()
       setMessage('비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.')
       window.setTimeout(() => navigate('/auth', { replace: true }), 900)
     } catch (cause) { setError(translateAuthError(cause, '비밀번호를 변경하지 못했어요.')) }

@@ -1,6 +1,7 @@
 import { ArrowLeft, MailCheck } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
+import { readRecoveryRequestReceipt } from '../lib/recoveryRequest'
 
 type RecoveryLocationState = {
   method?: 'email'
@@ -17,7 +18,11 @@ function maskEmail(email?: string) {
 export default function RecoverySent() {
   const location = useLocation()
   const state = location.state as RecoveryLocationState | null
-  const maskedEmail = maskEmail(state?.identifier)
+  const receipt = readRecoveryRequestReceipt()
+  const requestedEmail = state?.identifier ?? receipt?.identifier
+  const maskedEmail = maskEmail(requestedEmail)
+
+  if (!requestedEmail) return <Navigate to="/recover" replace />
 
   return <div className="content-page narrow-page auth-page play-flow-page recovery-sent-page">
     <PageHeader eyebrow="CHECK YOUR EMAIL" title="메일을 확인해 주세요." description="비밀번호 재설정 안내를 요청한 주소로 보냈습니다." />
