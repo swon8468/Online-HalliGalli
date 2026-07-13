@@ -4,6 +4,7 @@ const allowedOrigins = new Set((Deno.env.get('ALLOWED_ORIGINS') ?? [
   'https://develop.admin.haligali.swonport.kr',
   'https://admin.haligali.swonport.kr',
   'http://127.0.0.1:43127',
+  'http://localhost:43127',
 ].join(',')).split(',').map(value => value.trim()).filter(Boolean))
 
 function response(request: Request, body: unknown, status = 200) {
