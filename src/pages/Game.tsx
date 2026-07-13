@@ -73,10 +73,13 @@ export default function Game() {
   const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [rematchBusy, setRematchBusy] = useState(false)
   const [roomBusy, setRoomBusy] = useState(false)
+  const [sessionLookupState, setSessionLookupState] = useState<'idle' | 'loading' | 'failed' | 'none'>('idle')
+  const [sessionLookupAttempt, setSessionLookupAttempt] = useState(0)
   const tableRef = useRef<GameTableCard[]>([])
   const versionRef = useRef<number | null>(null)
   const activeGameIdRef = useRef(gameId)
   const gameViewRequestRef = useRef<{ gameId: string; promise: ReturnType<typeof loadGameView> } | null>(null)
+  const sessionLookupPromiseRef = useRef<ReturnType<typeof findMyActiveSession> | null>(null)
   const [practice, setPractice] = useState(() => createPracticeGame())
   const [practicePauseVersion, setPracticePauseVersion] = useState<number | null>(null)
   const practiceRef = useRef(practice)
@@ -135,6 +138,13 @@ export default function Game() {
     return promise
   }, [gameId])
 
+  const requestActiveSession = useCallback(() => {
+    if (!sessionLookupPromiseRef.current) {
+      sessionLookupPromiseRef.current = findMyActiveSession().finally(() => { sessionLookupPromiseRef.current = null })
+    }
+    return sessionLookupPromiseRef.current
+  }, [])
+
   const refresh = useCallback(async (ensureFresh = false) => {
     if (!gameId || isBotMode) return
     if (ensureFresh && gameViewRequestRef.current?.gameId === gameId) {
@@ -189,16 +199,21 @@ export default function Game() {
   useEffect(() => {
     if (isBotMode) { setMessage('내 차례예요. 아래 카드 더미를 누르세요.'); return }
     if (!gameId) {
+      let active = true
       setMessage('진행 중인 게임을 찾고 있어요.')
-      void findMyActiveSession().then(session => {
+      setSessionLookupState('loading')
+      void requestActiveSession().then(session => {
+        if (!active) return
         if (session?.type === 'game') navigate(`/game?game=${encodeURIComponent(session.gameId)}`, { replace: true })
-        else setMessage('진행 중인 게임이 없습니다.')
-      }).catch(() => setMessage('진행 중인 게임을 확인하지 못했습니다.'))
-      return
+        else if (session?.type === 'room') navigate(`/room/${encodeURIComponent(session.roomId)}`, { replace: true })
+        else { setMessage('진행 중인 게임이 없습니다.'); setSessionLookupState('none') }
+      }).catch(() => { if (active) { setMessage('진행 중인 게임을 확인하지 못했습니다.'); setSessionLookupState('failed') } })
+      return () => { active = false }
     }
+    setSessionLookupState('idle')
     void refresh()
     return subscribeToGame(gameId, () => void refresh())
-  }, [gameId, isBotMode, navigate, refresh])
+  }, [gameId, isBotMode, navigate, refresh, requestActiveSession, sessionLookupAttempt])
 
   // Realtime is the primary transport, but a browser can miss an update while
   // its websocket is reconnecting. Poll only on the low-activity result screen
@@ -432,6 +447,15 @@ export default function Game() {
     background: theme.backAssetUrl ? `url("${theme.backAssetUrl}") center / cover no-repeat` : theme.backStyle.background ?? '#0878dd',
     color: theme.backStyle.accent ?? '#ffffff',
   } : undefined
+
+  if (!isBotMode && !gameId) {
+    return <div className="route-loading" aria-live="polite"><div className="route-status-card" role={sessionLookupState === 'failed' ? 'alert' : 'status'}>
+      <strong>{sessionLookupState === 'loading' ? '진행 중인 게임을 확인하고 있어요.' : sessionLookupState === 'failed' ? '진행 중인 게임을 확인하지 못했어요.' : '진행 중인 게임이 없어요.'}</strong>
+      <p>{sessionLookupState === 'failed' ? '연결을 확인한 뒤 다시 시도해 주세요.' : sessionLookupState === 'none' ? '홈에서 방을 만들거나 연습 게임을 시작해 보세요.' : '잠시만 기다려 주세요.'}</p>
+      {sessionLookupState === 'failed' && <button className="primary-button" onClick={() => setSessionLookupAttempt(value => value + 1)}>다시 확인</button>}
+      {sessionLookupState === 'none' && <button className="primary-button" onClick={() => navigate('/', { replace: true })}>홈으로 돌아가기</button>}
+    </div></div>
+  }
 
   return (
     <div className="game-page game-page--arena">
