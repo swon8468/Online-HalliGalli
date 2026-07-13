@@ -20,6 +20,7 @@ import {
 import { subscribeToOnlineUsers } from '../lib/matchmaking'
 import { getGameInviteContext, inviteErrorMessage, sendGameInvite, type GameInviteContext } from '../lib/invites'
 import { disablePushNotifications, enablePushNotifications, getPushNotificationStatus } from '../lib/push'
+import { getErrorMessage } from '../lib/errorMessage'
 
 const EMPTY_OVERVIEW: FriendOverview = { friends: [], received: [], sent: [], blocked: [] }
 type PushState = 'loading' | 'unsupported' | 'disabled' | 'enabled'
@@ -139,7 +140,7 @@ export default function Friends() {
     try {
       if (pushState === 'enabled') { await disablePushNotifications(); setPushState('disabled'); setMessage('초대 알림을 껐어요.') }
       else { await enablePushNotifications(); setPushState('enabled'); setMessage('초대 알림을 켰어요.') }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '알림 설정을 변경하지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '알림 설정을 변경하지 못했어요.')) }
     finally { setPushBusy(false) }
   }
 

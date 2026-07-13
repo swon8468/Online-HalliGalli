@@ -7,6 +7,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isDevelopment } from '../lib/environment'
+import { getErrorMessage } from '../lib/errorMessage'
 import {
   emptyAdminData, executeAdminAction, fetchAdminData, type AdminAction, type AdminActionPayload,
   type AdminAuditRow, type AdminCardSetRow, type AdminData, type AdminRoomRow, type AdminSpaceRow,
@@ -63,7 +64,7 @@ export default function AdminDashboard() {
     if (!silent) setLoading(true)
     setError('')
     try { setData(await fetchAdminData()) }
-    catch (caught) { setError(caught instanceof Error ? caught.message : '관리자 데이터를 불러오지 못했습니다.') }
+    catch (caught) { setError(getErrorMessage(caught, '관리자 데이터를 불러오지 못했습니다.')) }
     finally { if (!silent) setLoading(false) }
   }
 
@@ -91,7 +92,7 @@ export default function AdminDashboard() {
       setDetail(null)
       setNotice('관리 조치가 완료되고 감사 로그에 기록되었습니다.')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '관리 작업을 완료하지 못했습니다.')
+      setError(getErrorMessage(caught, '관리 작업을 완료하지 못했습니다.'))
     } finally { setSubmitting(false) }
   }
 

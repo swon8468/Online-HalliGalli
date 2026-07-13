@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { copyText } from '../lib/clipboard'
+import { getErrorMessage } from '../lib/errorMessage'
 import {
   addExistingSpaceMember, bulkCreateSpaceAccounts, createSpaceAccount, loadSpaceAdmin, removeSpaceMember,
   rotateSpaceCode, updateSpace, updateSpaceMember, type SpaceAccountInput, type SpaceAdminSnapshot,
@@ -36,14 +37,14 @@ export default function SpaceAdmin() {
     if (!quiet) setLoading(true)
     try {
       const value = await loadSpaceAdmin(slug); setSnapshot(value); setName(value.space.name); setSpaceSlug(value.space.slug); setDescription(value.space.description ?? ''); setJoinEnabled(value.space.joinEnabled)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '스페이스를 불러오지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '스페이스를 불러오지 못했어요.')) }
     finally { if (!quiet) setLoading(false) }
   }, [slug])
   useEffect(() => { void refresh() }, [refresh])
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusy(key); setError(''); setMessage('')
     try { await action(); await refresh(true); setMessage(success) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '작업을 완료하지 못했어요.') }
+    catch (cause) { setError(getErrorMessage(cause, '작업을 완료하지 못했어요.')) }
     finally { setBusy('') }
   }
   const inviteUrl = snapshot ? `${window.location.origin}/spaces?code=${snapshot.space.joinCode}` : ''

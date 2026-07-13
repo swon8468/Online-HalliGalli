@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { getErrorMessage } from './errorMessage'
 
 export interface FriendProfile {
   userId: string
@@ -111,7 +112,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 }
 
 export function friendErrorMessage(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error)
+  const raw = getErrorMessage(error)
   const key = Object.keys(ERROR_MESSAGES).find(candidate => raw.includes(candidate))
   return key ? ERROR_MESSAGES[key] : '친구 정보를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.'
 }

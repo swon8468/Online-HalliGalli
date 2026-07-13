@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { inviteErrorMessage, respondGameInvite } from '../lib/invites'
+import { getErrorMessage } from '../lib/errorMessage'
 import { joinPrivateRoom } from '../lib/rooms'
 
 export default function JoinRoom() {
@@ -36,7 +37,7 @@ export default function JoinRoom() {
     setBusy(true); setError('')
     try { const joinedRoom = await joinPrivateRoom(code); navigate(`/room/${encodeURIComponent(joinedRoom.id)}`, { replace: true }) }
     catch (caught) {
-      const message = caught instanceof Error ? caught.message : caught && typeof caught === 'object' && 'message' in caught ? String(caught.message) : ''
+      const message = getErrorMessage(caught)
       setError(message.includes('kicked_users_cannot_rejoin') || message.includes('kicked users cannot rejoin') ? '이 방에서 강퇴되어 다시 참여할 수 없어요.' : message.includes('room_full') || message.includes('room is full') ? '방이 가득 찼어요.' : message.includes('room_started') ? '이미 게임이 시작된 방이에요.' : message.includes('room_closed') ? '이미 닫힌 방이에요.' : message.includes('room_not_found') || message.includes('room not found') ? '방 코드를 확인해 주세요.' : message || '방에 참여하지 못했습니다.')
     }
     finally { setBusy(false) }

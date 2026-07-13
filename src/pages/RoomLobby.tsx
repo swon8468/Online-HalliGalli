@@ -5,10 +5,11 @@ import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
 import { copyText, shareWasCancelled } from '../lib/clipboard'
+import { getErrorMessage } from '../lib/errorMessage'
 import { closeWaitingRoom, getMyRoomRemoval, kickRoomMember, leaveRoom, loadRoom, loadRoomGame, loadRoomMembers, setRoomReady, startRoomGame, subscribeToRoom, transferRoomHost, updateRoomCapacity, type RoomInfo, type RoomMemberInfo } from '../lib/rooms'
 
 function roomErrorMessage(cause: unknown) {
-  const raw = cause instanceof Error ? cause.message : cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : ''
+  const raw = getErrorMessage(cause)
   const messages: Record<string, string> = {
     host_only: '방장만 이 작업을 할 수 있어요.', players_not_ready: '모든 참가자가 준비해야 게임을 시작할 수 있어요.',
     room_not_waiting: '이미 시작되었거나 닫힌 방이에요.', capacity_below_members: '현재 참가자 수보다 최대 인원을 줄일 수 없어요.',

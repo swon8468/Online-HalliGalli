@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { createPrivateRoom, createSpaceRoom } from '../lib/rooms'
+import { getErrorMessage } from '../lib/errorMessage'
 import { fetchMySpaces, type MySpace } from '../lib/spaces'
 import { listCardSets, type CardSetSummary } from '../lib/cards'
 
@@ -30,7 +31,7 @@ export default function CreateRoom() {
       const room = spaceId ? await createSpaceRoom(spaceId, maxPlayers, cardSetId || null) : await createPrivateRoom(maxPlayers)
       navigate(`/room/${encodeURIComponent(room.id)}`, { replace: true })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '방을 생성하지 못했어요.')
+      setError(getErrorMessage(cause, '방을 생성하지 못했어요.'))
       setBusy(false)
     }
   }

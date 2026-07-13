@@ -2,6 +2,7 @@ import { ArrowLeft, Brush, CheckCircle2, Copy, ImageUp, Layers3, Save, Send, Sli
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Fruit } from '../components/Fruit'
+import { getErrorMessage } from '../lib/errorMessage'
 import {
   cardAssetUrl, loadCardSet, publishCardSet, saveCardDesign, saveCardSetMeta, unpublishCardSet,
   uploadCardAsset, type CardDesignRecord, type CardFruit, type CardSetDetail,
@@ -27,13 +28,13 @@ export default function CardDesigner() {
   const refresh = useCallback(async () => {
     try {
       const value = await loadCardSet(cardSetId); setCardSet(value); setName(value.name); setDescription(value.description ?? ''); setBackAssetPath(value.backAssetPath); setBackBackground(value.backDesign.background ?? '#0878dd'); setBackAccent(value.backDesign.accent ?? '#ffffff'); setDesigns(value.designs)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '카드 세트를 불러오지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 불러오지 못했어요.')) }
   }, [cardSetId])
   useEffect(() => { void refresh() }, [refresh])
   const selected = useMemo(() => designs.find(design => design.id === selectedId) ?? null, [designs, selectedId])
   const editable = Boolean(cardSet?.canManage && cardSet.status !== 'published' && !cardSet.isPlatformDefault)
   const updateSelected = (patch: Partial<CardDesignRecord>) => { if (!selected) return; setDesigns(items => items.map(item => item.id === selected.id ? { ...item, ...patch } : item)) }
-  const run = async (key: string, action: () => Promise<void>, success: string) => { setBusy(key); setError(''); setMessage(''); try { await action(); await refresh(); setMessage(success) } catch (cause) { setError(cause instanceof Error ? cause.message : '작업을 완료하지 못했어요.') } finally { setBusy('') } }
+  const run = async (key: string, action: () => Promise<void>, success: string) => { setBusy(key); setError(''); setMessage(''); try { await action(); await refresh(); setMessage(success) } catch (cause) { setError(getErrorMessage(cause, '작업을 완료하지 못했어요.')) } finally { setBusy('') } }
   const save = () => void run('save', async () => {
     if (!cardSet) return
     await saveCardSetMeta(cardSet.id, { name, description, backAssetPath, backDesign: { ...cardSet.backDesign, background: backBackground, accent: backAccent } })
@@ -46,7 +47,7 @@ export default function CardDesigner() {
       const path = await uploadCardAsset(cardSet.id, file, kind === 'back' ? 'back' : `${selected?.fruit}-${selected?.count}`)
       if (kind === 'back') setBackAssetPath(path); else updateSelected({ frontAssetPath: path })
       setMessage('이미지를 업로드했어요. 저장 버튼을 눌러 반영하세요.')
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '이미지를 업로드하지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '이미지를 업로드하지 못했어요.')) }
     finally { setBusy('') }
   }
   if (!cardSet) return <div className="route-loading">{error || '카드 스튜디오를 여는 중...'}</div>

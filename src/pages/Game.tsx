@@ -6,6 +6,7 @@ import { Fruit } from '../components/Fruit'
 import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTopCards, practiceBotRingMessage, practiceBotWrongPendingMessage, practiceDifficulty, practiceIsExactFive, revealPracticeCard, ringPracticeBell, type PracticeActor, type PracticeCard, type PracticeDifficulty, type PracticeGameState } from '../game/practiceEngine'
 import { loadGameSettings, playGameSound, saveGameSettings, vibrateGame, type GameSettings } from '../game/settings'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
+import { getErrorMessage } from '../lib/errorMessage'
 import { abandonGame, findMyActiveSession, loadGameView, requestGameRematch, returnFinishedGameToRoom, revealGameCard, ringGameBell, subscribeToGame, type GameCardTheme, type GamePlayerInfo, type GameSnapshot, type GameTableCard } from '../lib/rooms'
 
 const emptyState: GameSnapshot = {
@@ -14,7 +15,7 @@ const emptyState: GameSnapshot = {
 }
 
 function gameErrorMessage(caught: unknown) {
-  const message = caught instanceof Error ? caught.message : ''
+  const message = getErrorMessage(caught)
   if (message.includes('not your turn')) return '아직 내 차례가 아니에요.'
   if (message.includes('already_rung')) return '이번 카드에서는 이미 종이 울렸어요.'
   if (message.includes('no cards')) return '뒤집을 카드가 없어요.'

@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { cloneCardSet, createCardSet, deleteCardSet, listCardSets, type CardSetSummary } from '../lib/cards'
+import { getErrorMessage } from '../lib/errorMessage'
 import { fetchMySpaces, type MySpace } from '../lib/spaces'
 
 export default function CardSets() {
@@ -27,7 +28,7 @@ export default function CardSets() {
     try {
       const [cards, memberships] = await Promise.all([listCardSets(requestedSpace), fetchMySpaces()])
       setSets(cards); setSpaces(memberships.filter(space => ['owner', 'manager'].includes(space.role) && space.status === 'active'))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '카드 세트를 불러오지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 불러오지 못했어요.')) }
     finally { setLoading(false) }
   }, [requestedSpace])
   useEffect(() => { void refresh() }, [refresh])
@@ -39,14 +40,14 @@ export default function CardSets() {
       if (modal === 'clone' && source) await cloneCardSet(source.id, name, spaceId || null)
       else await createCardSet(name, description, spaceId || null)
       setModal(null); await refresh(); setMessage(modal === 'clone' ? '카드 세트를 복제했어요.' : '초안 카드 세트를 만들었어요.')
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '카드 세트를 만들지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 만들지 못했어요.')) }
     finally { setBusy(false) }
   }
   const remove = async () => {
     if (!deleteTarget) return
     setBusy(true); setError(''); setMessage('')
     try { await deleteCardSet(deleteTarget.id); setDeleteTarget(null); await refresh(); setMessage('카드 세트를 삭제했어요.') }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '삭제하지 못했어요.') }
+    catch (cause) { setError(getErrorMessage(cause, '삭제하지 못했어요.')) }
     finally { setBusy(false) }
   }
   const canCreatePlatform = ['admin', 'super_admin'].includes(user?.role ?? '')

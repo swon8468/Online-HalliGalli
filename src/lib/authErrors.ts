@@ -1,5 +1,7 @@
+import { getErrorMessage } from './errorMessage'
+
 export function translateAuthError(error: unknown, fallback = '계정 정보를 확인해 주세요.') {
-  const message = error instanceof Error ? error.message : error && typeof error === 'object' && 'message' in error ? String(error.message) : String(error ?? '')
+  const message = getErrorMessage(error)
   const normalized = message.toLowerCase()
 
   if (normalized.includes('invalid login credentials')) return '이메일 또는 비밀번호가 일치하지 않아요.'

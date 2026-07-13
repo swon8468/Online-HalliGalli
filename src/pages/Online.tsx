@@ -3,12 +3,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
+import { getErrorMessage } from '../lib/errorMessage'
 import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus } from '../lib/matchmaking'
 
 const idleStatus: MatchmakingStatus = { status: 'idle', queueCount: 0, members: [] }
 
 function matchingError(error: unknown) {
-  const message = error instanceof Error ? error.message : ''
+  const message = getErrorMessage(error)
   if (message.includes('active room or game')) return '이미 참여 중인 방이나 게임이 있어요.'
   if (message.includes('match already created')) return '이미 매칭이 완료되어 게임으로 이동합니다.'
   if (message.includes('invalid player count')) return '2명부터 6명까지 선택해 주세요.'

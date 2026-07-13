@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { copyText } from '../lib/clipboard'
+import { getErrorMessage } from '../lib/errorMessage'
 import { createSpace, fetchMySpaces, joinSpace, type MySpace } from '../lib/spaces'
 
 export default function Spaces() {
@@ -23,14 +24,14 @@ export default function Spaces() {
 
   const refresh = async () => {
     try { setSpaces(await fetchMySpaces()) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '스페이스를 불러오지 못했어요.') }
+    catch (cause) { setError(getErrorMessage(cause, '스페이스를 불러오지 못했어요.')) }
     finally { setLoading(false) }
   }
   useEffect(() => { void refresh() }, [])
   const join = async (event: FormEvent) => {
     event.preventDefault(); setBusy('join'); setError(''); setMessage('')
     try { const joined = await joinSpace(joinCode); await refresh(); setMessage(`${joined.name}에 가입했어요.`); setJoinCode('') }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '가입하지 못했어요.') }
+    catch (cause) { setError(getErrorMessage(cause, '가입하지 못했어요.')) }
     finally { setBusy('') }
   }
   const create = async (event: FormEvent) => {
@@ -38,7 +39,7 @@ export default function Spaces() {
     try {
       const result = await createSpace({ name, slug, description, reason: '관리자 화면에서 스페이스 생성' })
       setCreateOpen(false); await refresh(); navigate(`/spaces/${encodeURIComponent(result.space.slug)}/admin`)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '스페이스를 만들지 못했어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '스페이스를 만들지 못했어요.')) }
     finally { setBusy('') }
   }
   const canCreate = ['admin', 'super_admin'].includes(user?.role ?? '')
