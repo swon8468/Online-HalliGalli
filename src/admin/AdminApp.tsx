@@ -1,15 +1,32 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
+import { Route, Routes } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { translateAuthError } from '../lib/authErrors'
+import CardDesigner from '../pages/CardDesigner'
+import CardSets from '../pages/CardSets'
+import CreateRoom from '../pages/CreateRoom'
+import Game from '../pages/Game'
+import RoomLobby from '../pages/RoomLobby'
+import SpaceAdmin from '../pages/SpaceAdmin'
+import Spaces from '../pages/Spaces'
 import AdminDashboard from './AdminDashboard'
 
 export default function AdminApp() {
   const { user } = useAuth()
   if (!user) return <AdminLogin />
   if (!['support', 'admin', 'super_admin'].includes(user.role)) return <div className="admin-access-denied"><ShieldCheck /><h1>관리자 권한이 필요합니다.</h1><p>플랫폼 관리자에게 권한을 요청하세요.</p></div>
-  return <AdminDashboard />
+  return <Routes>
+    <Route path="cards" element={<CardSets />} />
+    <Route path="cards/:cardSetId" element={<CardDesigner />} />
+    <Route path="spaces" element={<Spaces />} />
+    <Route path="spaces/:slug/admin" element={<SpaceAdmin />} />
+    <Route path="create" element={<CreateRoom />} />
+    <Route path="room/:roomId" element={<RoomLobby />} />
+    <Route path="game" element={<Game />} />
+    <Route path="*" element={<AdminDashboard />} />
+  </Routes>
 }
 
 function AdminLogin() {
