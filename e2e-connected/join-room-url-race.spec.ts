@@ -15,6 +15,10 @@ test('같은 참여 화면에서 변경된 코드와 퇴장 사유를 즉시 반
   await page.goto('/join?code=ABC123')
   const code = page.getByLabel('방 코드')
   await expect(code).toHaveValue('ABC123')
+  await code.fill('AB')
+  await page.getByRole('button', { name: '방 참여하기' }).click()
+  await expect(code).toHaveAttribute('aria-invalid', 'true')
+  await expect(code).toHaveAttribute('aria-describedby', 'join-room-error')
 
   await page.evaluate(() => {
     history.pushState({}, '', '/join?code=XYZ999&reason=kicked&detail=%EC%8B%A0%EA%B3%A0')

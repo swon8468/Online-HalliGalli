@@ -102,11 +102,11 @@ export default function Auth() {
         <div className="auth-field">
           <label htmlFor="auth-identifier"><span>{method === 'email' ? <AtSign /> : <Phone />}{method === 'email' ? '이메일' : '전화번호'}</span></label>
           <div className={`identifier-control ${identifierError ? 'has-error' : ''} ${duplicateStatus === 'available' ? 'is-available' : ''}`}>
-            <input id="auth-identifier" type={method === 'email' ? 'email' : 'tel'} value={identifier} onChange={event => { duplicateCheckVersion.current += 1; setIdentifier(event.target.value); setDuplicateStatus('idle'); setIdentifierError(''); setError('') }} placeholder={method === 'email' ? 'player@example.com' : '+82 10 1234 5678'} required />
+            <input id="auth-identifier" type={method === 'email' ? 'email' : 'tel'} value={identifier} onChange={event => { duplicateCheckVersion.current += 1; setIdentifier(event.target.value); setDuplicateStatus('idle'); setIdentifierError(''); setError('') }} placeholder={method === 'email' ? 'player@example.com' : '+82 10 1234 5678'} aria-invalid={Boolean(identifierError)} aria-describedby={identifierError ? 'auth-identifier-error' : duplicateStatus === 'available' ? 'auth-identifier-success' : undefined} required />
             {mode === 'signup' && <button type="button" onClick={() => void checkDuplicate()} disabled={duplicateStatus === 'checking'}>{duplicateStatus === 'checking' ? '확인 중' : '중복 확인'}</button>}
           </div>
-          {identifierError && <small className="field-message field-message--error">{identifierError}</small>}
-          {!identifierError && duplicateStatus === 'available' && <small className="field-message field-message--success">사용할 수 있어요.</small>}
+          {identifierError && <small id="auth-identifier-error" className="field-message field-message--error">{identifierError}</small>}
+          {!identifierError && duplicateStatus === 'available' && <small id="auth-identifier-success" className="field-message field-message--success">사용할 수 있어요.</small>}
         </div>
         <label><span><LockKeyhole /> 비밀번호</span><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="8자 이상" minLength={8} required /></label>
         {mode === 'signup' && <label><span><LockKeyhole /> 비밀번호 확인</span><input type="password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} placeholder="비밀번호를 다시 입력" minLength={8} required /></label>}
