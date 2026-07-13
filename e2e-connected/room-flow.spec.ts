@@ -70,6 +70,19 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     await expect(host.locator('.connection-banner')).toHaveCount(0)
 
     await host.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } })
+    })
+    await host.getByRole('button', { name: '코드 복사' }).click()
+    await expect(host.getByRole('button', { name: '복사했어요' })).toBeVisible()
+    await host.waitForTimeout(1_000)
+    await host.getByRole('button', { name: /초대 링크 공유/ }).click()
+    await host.waitForTimeout(800)
+    await expect(host.getByRole('button', { name: '복사했어요' })).toBeVisible()
+    await host.waitForTimeout(900)
+    await expect(host.getByRole('button', { name: '코드 복사' })).toBeVisible()
+
+    await host.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new DOMException('denied', 'NotAllowedError') } } })
       Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
     })

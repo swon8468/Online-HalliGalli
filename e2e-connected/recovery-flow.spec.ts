@@ -112,7 +112,11 @@ test('실제 복구 링크로 저장한 새 비밀번호로 로그인할 수 있
     await page.getByLabel('새 비밀번호', { exact: true }).fill(changedPassword)
     await page.getByLabel('새 비밀번호 확인').fill(changedPassword)
     await page.getByRole('button', { name: /새 비밀번호 저장/ }).click()
-    await expect(page).toHaveURL('/auth', { timeout: 5_000 })
+    await expect(page.getByText('비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.')).toBeVisible()
+    await page.getByRole('link', { name: '게임 룰' }).click()
+    await page.waitForTimeout(1_100)
+    await expect(page).toHaveURL('/rules')
+    await page.goto('/auth')
 
     await page.getByLabel('이메일').fill(accounts[1].email)
     await page.getByLabel('비밀번호').fill(changedPassword)

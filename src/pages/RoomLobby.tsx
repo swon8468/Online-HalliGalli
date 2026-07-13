@@ -36,6 +36,22 @@ export default function RoomLobby() {
   const [kickTarget, setKickTarget] = useState<RoomMemberInfo | null>(null)
   const [kickReason, setKickReason] = useState('')
   const refreshPromiseRef = useRef<Promise<void> | null>(null)
+  const copiedTimerRef = useRef<number | null>(null)
+
+  const resetCopied = () => {
+    if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = null
+    setCopied(false)
+  }
+  const showCopied = (nextMessage: string) => {
+    resetCopied()
+    setCopied(true); setMessage(nextMessage)
+    copiedTimerRef.current = window.setTimeout(() => { copiedTimerRef.current = null; setCopied(false) }, 1600)
+  }
+
+  useEffect(() => () => {
+    if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
+  }, [])
 
   const refresh = useCallback(async (ensureFresh = false) => {
     if (!roomId) return
@@ -88,13 +104,15 @@ export default function RoomLobby() {
   }
   const copyCode = async () => {
     if (!room) return
+    resetCopied()
     setError(''); setMessage('')
-    if (!await copyText(room.code)) { setCopied(false); setError('초대 코드를 복사하지 못했어요. 화면의 코드를 직접 입력해 주세요.'); return }
-    setCopied(true); setMessage('초대 코드를 복사했어요.'); window.setTimeout(() => setCopied(false), 1600)
+    if (!await copyText(room.code)) { setError('초대 코드를 복사하지 못했어요. 화면의 코드를 직접 입력해 주세요.'); return }
+    showCopied('초대 코드를 복사했어요.')
   }
   const shareRoom = async () => {
     if (!room) return
     const url = `${window.location.origin}/join?code=${room.code}`
+    resetCopied()
     setError(''); setMessage('')
     try {
       if (!navigator.share) throw new Error('share unavailable')
@@ -102,8 +120,8 @@ export default function RoomLobby() {
       setMessage('초대 링크를 공유했어요.')
     } catch (cause) {
       if (shareWasCancelled(cause)) { setMessage('공유를 취소했어요.'); return }
-      if (!await copyText(url)) { setCopied(false); setError('초대 링크를 복사하지 못했어요. 주소창의 링크를 직접 공유해 주세요.'); return }
-      setCopied(true); setMessage('초대 링크를 복사했어요.'); window.setTimeout(() => setCopied(false), 1600)
+      if (!await copyText(url)) { setError('초대 링크를 복사하지 못했어요. 주소창의 링크를 직접 공유해 주세요.'); return }
+      showCopied('초대 링크를 복사했어요.')
     }
   }
   const confirmKick = () => { if (room && kickTarget) void run(async () => { await kickRoomMember(room.id, kickTarget.userId, kickReason); setKickTarget(null); setKickReason('') }, `${kickTarget.nickname}님을 강퇴했어요.`) }

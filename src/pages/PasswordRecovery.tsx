@@ -1,5 +1,5 @@
 import { ArrowRight, AtSign, KeyRound, Phone, ShieldCheck } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { translateAuthError } from '../lib/authErrors'
@@ -24,6 +24,11 @@ export default function PasswordRecovery() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const redirectTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (!supabase) { if (recoveryHint) setRecoveryLinkState('invalid'); return }
@@ -88,7 +93,8 @@ export default function PasswordRecovery() {
       await supabase.auth.signOut()
       clearRecoveryRequestReceipt()
       setMessage('비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.')
-      window.setTimeout(() => navigate('/auth', { replace: true }), 900)
+      if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+      redirectTimerRef.current = window.setTimeout(() => { redirectTimerRef.current = null; navigate('/auth', { replace: true }) }, 900)
     } catch (cause) { setError(translateAuthError(cause, '비밀번호를 변경하지 못했어요.')) }
     finally { setBusy(false) }
   }
