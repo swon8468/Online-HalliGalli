@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js'
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { createUuid } from '../lib/id'
 
@@ -48,13 +48,31 @@ function credentials(identifier: string, password: string) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const sessionRejectionRef = useRef<Promise<void> | null>(null)
+  const interactiveAuthRef = useRef(false)
+
+  const rejectSession = useCallback(async () => {
+    setUser(null)
+    if (!supabase) return
+    if (!sessionRejectionRef.current) {
+      sessionRejectionRef.current = supabase.auth.signOut({ scope: 'local' }).then(() => undefined).finally(() => {
+        sessionRejectionRef.current = null
+      })
+    }
+    await sessionRejectionRef.current
+  }, [])
 
   const resolveUser = async (authUser: User | null) => {
     if (!authUser || !supabase) return authUser ? mapUser(authUser) : null
-    const { data: profile } = await supabase.from('profiles').select('nickname,platform_role,suspended_until,suspension_reason,deleted_at').eq('id', authUser.id).maybeSingle()
+    const { data: profile, error } = await supabase.from('profiles').select('nickname,platform_role,suspended_until,suspension_reason,deleted_at').eq('id', authUser.id).maybeSingle()
+    // Authentication alone is not enough to authorize the app. The profile is
+    // the source of truth for suspension, deletion and platform permissions, so
+    // fail closed when its state cannot be verified.
+    if (error) throw new Error('profile_check_failed')
+    if (!profile) throw new Error('account_unavailable')
     if (profile?.deleted_at) throw new Error('account_deleted')
     if (profile?.suspended_until && new Date(profile.suspended_until) > new Date()) throw new Error(`account_suspended:${profile.suspension_reason ?? ''}`)
-    return { ...mapUser(authUser), label: profile?.nickname ?? mapUser(authUser).label, role: profile?.platform_role ?? mapUser(authUser).role }
+    return { ...mapUser(authUser), label: profile.nickname ?? mapUser(authUser).label, role: profile.platform_role ?? mapUser(authUser).role }
   }
 
   useEffect(() => {
@@ -66,23 +84,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const client = supabase
 
-    void client.auth.getUser().then(({ data }) => resolveUser(data.user)).then(setUser).catch(() => { setUser(null); void client.auth.signOut() }).finally(() => setLoading(false))
+    void client.auth.getUser().then(({ data }) => resolveUser(data.user)).then(setUser).catch(() => rejectSession()).finally(() => setLoading(false))
     const { data } = client.auth.onAuthStateChange((_event, session) => {
-      void resolveUser(session?.user ?? null).then(setUser).catch(() => { setUser(null); void client.auth.signOut() }).finally(() => setLoading(false))
+      // signIn/signUp validates the same session itself. Processing the nested
+      // event here can attempt signOut while the Auth client still owns its lock.
+      if (interactiveAuthRef.current) return
+      void resolveUser(session?.user ?? null).then(setUser).catch(() => rejectSession()).finally(() => setLoading(false))
     })
     return () => data.subscription.unsubscribe()
-  }, [])
+  }, [rejectSession])
 
   const value = useMemo<AuthContextValue>(() => ({
     user,
     loading,
     signIn: async (identifier, password) => {
       if (supabase) {
-        const { data, error } = await supabase.auth.signInWithPassword(credentials(identifier, password))
-        if (error) throw error
-        if (data.user) {
-          try { setUser(await resolveUser(data.user)) }
-          catch (cause) { await supabase.auth.signOut(); throw cause }
+        interactiveAuthRef.current = true
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword(credentials(identifier, password))
+          if (error) throw error
+          if (data.user) {
+            try { setUser(await resolveUser(data.user)) }
+            catch (cause) { await rejectSession(); throw cause }
+          }
+        } finally {
+          interactiveAuthRef.current = false
         }
         return
       }
@@ -92,11 +118,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     signUp: async (identifier, password, nickname) => {
       if (supabase) {
-        const { data, error } = await supabase.auth.signUp({ ...credentials(identifier, password), options: { data: { nickname } } })
-        if (error) throw error
-        if (data.user && data.session) setUser(await resolveUser(data.user))
-        else setUser(null)
-        return { requiresVerification: Boolean(data.user && !data.session) }
+        interactiveAuthRef.current = true
+        try {
+          const { data, error } = await supabase.auth.signUp({ ...credentials(identifier, password), options: { data: { nickname } } })
+          if (error) throw error
+          if (data.user && data.session) {
+            try { setUser(await resolveUser(data.user)) }
+            catch (cause) { await rejectSession(); throw cause }
+          } else setUser(null)
+          return { requiresVerification: Boolean(data.user && !data.session) }
+        } finally {
+          interactiveAuthRef.current = false
+        }
       }
       const demoUser: AppUser = { id: createUuid(), label: nickname, source: 'demo', role: 'player', email: identifier.includes('@') ? identifier : null, phone: identifier.includes('@') ? null : identifier, emailConfirmed: false, phoneConfirmed: false }
       localStorage.setItem(DEMO_USER_KEY, JSON.stringify(demoUser))
@@ -118,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data } = await supabase.auth.getUser()
       setUser(await resolveUser(data.user))
     },
-  }), [user, loading])
+  }), [user, loading, rejectSession])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

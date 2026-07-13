@@ -9,6 +9,8 @@ export function translateAuthError(error: unknown, fallback = '계정 정보를 
   if (normalized.includes('user is banned')) return '정지된 계정이에요. 관리자에게 문의해 주세요.'
   if (normalized.includes('account_suspended')) return `정지된 계정이에요.${message.split(':')[1] ? ` 사유: ${message.split(':').slice(1).join(':')}` : ' 관리자에게 문의해 주세요.'}`
   if (normalized.includes('account_deleted')) return '탈퇴 처리된 계정이라 로그인할 수 없어요.'
+  if (normalized.includes('account_unavailable')) return '사용할 수 없는 계정이에요. 관리자에게 문의해 주세요.'
+  if (normalized.includes('profile_check_failed')) return '계정 상태를 확인할 수 없어요. 잠시 후 다시 시도해 주세요.'
   if (normalized.includes('too many requests') || normalized.includes('rate limit')) return '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.'
   if (normalized.includes('email address not authorized')) return '현재 이 이메일로 인증 메일을 보낼 수 없어요. 관리자에게 문의해 주세요.'
   if (normalized.includes('unsupported phone provider') || normalized.includes('phone provider is disabled')) return '현재 전화번호 인증을 사용할 수 없어요.'
