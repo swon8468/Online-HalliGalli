@@ -26,6 +26,27 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     const code = (await host.locator('.room-code').innerText()).replace(/\s/g, '')
     expect(code).toMatch(/^[A-Z]{3}[0-9]{3}$/)
 
+    await host.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new DOMException('denied', 'NotAllowedError') } } })
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
+    })
+    await host.getByRole('button', { name: '코드 복사' }).click()
+    await expect(host.getByRole('alert')).toContainText('초대 코드를 복사하지 못했어요.')
+
+    await host.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async () => { throw new DOMException('cancelled', 'AbortError') } })
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('취소 후 복사하면 안 됩니다.') } } })
+    })
+    await host.getByRole('button', { name: /초대 링크 공유/ }).click()
+    await expect(host.getByRole('status')).toContainText('공유를 취소했어요.')
+
+    await host.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } })
+    })
+    await host.getByRole('button', { name: /초대 링크 공유/ }).click()
+    await expect(host.getByRole('status')).toContainText('초대 링크를 복사했어요.')
+
     await guest.goto(`/join?code=${code}`)
     await guest.getByRole('button', { name: /방 참여하기/ }).click()
     await expect(guest).toHaveURL(/\/room\/[0-9a-f-]+$/)

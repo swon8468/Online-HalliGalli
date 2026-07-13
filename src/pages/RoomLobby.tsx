@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
+import { copyText, shareWasCancelled } from '../lib/clipboard'
 import { closeWaitingRoom, getMyRoomRemoval, kickRoomMember, leaveRoom, loadRoom, loadRoomGame, loadRoomMembers, setRoomReady, startRoomGame, subscribeToRoom, transferRoomHost, updateRoomCapacity, type RoomInfo, type RoomMemberInfo } from '../lib/rooms'
 
 function roomErrorMessage(cause: unknown) {
@@ -73,14 +74,25 @@ export default function RoomLobby() {
     catch (cause) { setError(roomErrorMessage(cause)) }
     finally { setBusy(false) }
   }
-  const copyCode = async () => { if (!room) return; await navigator.clipboard?.writeText(room.code); setCopied(true); window.setTimeout(() => setCopied(false), 1600) }
+  const copyCode = async () => {
+    if (!room) return
+    setError(''); setMessage('')
+    if (!await copyText(room.code)) { setCopied(false); setError('초대 코드를 복사하지 못했어요. 화면의 코드를 직접 입력해 주세요.'); return }
+    setCopied(true); setMessage('초대 코드를 복사했어요.'); window.setTimeout(() => setCopied(false), 1600)
+  }
   const shareRoom = async () => {
     if (!room) return
     const url = `${window.location.origin}/join?code=${room.code}`
+    setError(''); setMessage('')
     try {
       if (!navigator.share) throw new Error('share unavailable')
       await navigator.share({ title: 'Halli Galli 초대', text: `방 코드 ${room.code}`, url })
-    } catch { await navigator.clipboard?.writeText(url); setCopied(true); setMessage('초대 링크를 복사했어요.') }
+      setMessage('초대 링크를 공유했어요.')
+    } catch (cause) {
+      if (shareWasCancelled(cause)) { setMessage('공유를 취소했어요.'); return }
+      if (!await copyText(url)) { setCopied(false); setError('초대 링크를 복사하지 못했어요. 주소창의 링크를 직접 공유해 주세요.'); return }
+      setCopied(true); setMessage('초대 링크를 복사했어요.'); window.setTimeout(() => setCopied(false), 1600)
+    }
   }
   const confirmKick = () => { if (room && kickTarget) void run(async () => { await kickRoomMember(room.id, kickTarget.userId, kickReason); setKickTarget(null); setKickReason('') }, `${kickTarget.nickname}님을 강퇴했어요.`) }
   const start = () => room && void run(async () => navigate(`/game?game=${encodeURIComponent(await startRoomGame(room.id))}`))

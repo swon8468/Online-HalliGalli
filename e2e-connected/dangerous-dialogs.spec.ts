@@ -12,14 +12,30 @@ async function login(page: Page) {
 
 test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page }) => {
   await login(page)
+  await page.goto('/account')
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new DOMException('denied', 'NotAllowedError') } } })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
+  })
+  await page.getByRole('button', { name: '친구 태그 복사' }).click()
+  await expect(page.getByRole('alert')).toContainText('친구 태그를 복사하지 못했어요.')
+
   await page.goto('/spaces')
   await page.getByRole('button', { name: '스페이스 생성', exact: true }).click()
   const createSpace = page.getByRole('dialog', { name: '스페이스 생성' })
+  await expect(createSpace.getByRole('button', { name: '관리 URL 복사' })).toBeDisabled()
   await createSpace.getByLabel('이름').fill('E2E 릴리스 단체')
   await createSpace.getByRole('textbox', { name: 'Slug', exact: true }).fill('e2e-release-space')
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } }))
+  await createSpace.getByRole('button', { name: '관리 URL 복사' }).click()
+  await expect(page.getByRole('status')).toContainText('관리 URL을 복사했어요.')
   await createSpace.getByLabel('설명').fill('위험 작업 모달 자동 검증')
   await createSpace.getByRole('button', { name: '생성', exact: true }).click()
   await expect(page).toHaveURL('/spaces/e2e-release-space/admin', { timeout: 15_000 })
+
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } }))
+  await page.getByRole('button', { name: '링크 복사' }).click()
+  await expect(page.getByRole('status')).toContainText('가입 링크를 복사했어요.')
 
   await page.getByRole('button', { name: '설정', exact: true }).click()
   await page.getByRole('button', { name: '스페이스 비활성화' }).click()
