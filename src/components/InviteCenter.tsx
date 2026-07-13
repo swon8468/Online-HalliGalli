@@ -19,49 +19,71 @@ export default function InviteCenter() {
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
-  const refreshPromiseRef = useRef<Promise<GameInvitesOverview> | null>(null)
+  const userId = user?.id ?? null
+  const activeUserIdRef = useRef(userId)
+  const refreshPromiseRef = useRef<{ userId: string; promise: Promise<GameInvitesOverview> } | null>(null)
+  activeUserIdRef.current = userId
 
-  const requestInvites = useCallback(() => {
-    if (!refreshPromiseRef.current) refreshPromiseRef.current = getGameInvites().finally(() => { refreshPromiseRef.current = null })
-    return refreshPromiseRef.current
+  const requestInvites = useCallback((requestedUserId: string) => {
+    if (refreshPromiseRef.current?.userId === requestedUserId) return refreshPromiseRef.current.promise
+    const promise = getGameInvites().finally(() => {
+      if (refreshPromiseRef.current?.promise === promise) refreshPromiseRef.current = null
+    })
+    refreshPromiseRef.current = { userId: requestedUserId, promise }
+    return promise
   }, [])
 
   const refresh = useCallback(async (ensureFresh = false) => {
-    if (!user) return
-    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    if (!userId) return
+    if (ensureFresh && refreshPromiseRef.current?.userId === userId) await refreshPromiseRef.current.promise.catch(() => undefined)
     setLoading(true)
-    try { setInvites(await requestInvites()); setError('') }
-    catch (cause) { setError(inviteErrorMessage(cause)) }
-    finally { setLoading(false) }
-  }, [requestInvites, user])
+    try {
+      const nextInvites = await requestInvites(userId)
+      if (activeUserIdRef.current !== userId) return
+      setInvites(nextInvites); setError('')
+    } catch (cause) {
+      if (activeUserIdRef.current === userId) setError(inviteErrorMessage(cause))
+    } finally {
+      if (activeUserIdRef.current === userId) setLoading(false)
+    }
+  }, [requestInvites, userId])
 
   useEffect(() => {
-    if (!user) { setInvites(EMPTY); return }
+    if (!userId) {
+      setInvites(EMPTY); setOpen(false); setLoading(false); setBusyId(''); setError('')
+      return
+    }
+    setInvites(EMPTY); setOpen(false); setError('')
     void refresh()
-    const unsubscribe = subscribeToGameInvites(user.id, () => void refresh())
+    const unsubscribe = subscribeToGameInvites(userId, () => void refresh())
     const timer = window.setInterval(() => void refresh(), 30_000)
     return () => { unsubscribe(); window.clearInterval(timer) }
-  }, [refresh, user])
+  }, [refresh, userId])
 
   const respond = async (inviteId: string, accept: boolean) => {
+    const actorUserId = userId
+    if (!actorUserId) return
     setBusyId(inviteId); setError('')
     try {
       const result = await respondGameInvite(inviteId, accept)
       await refresh(true)
+      if (activeUserIdRef.current !== actorUserId) return
       if (accept && result.roomId) { setOpen(false); navigate(`/room/${encodeURIComponent(result.roomId)}`) }
     } catch (cause) {
       const actionError = inviteErrorMessage(cause)
       await refresh(true)
-      setError(actionError)
+      if (activeUserIdRef.current === actorUserId) setError(actionError)
     }
-    finally { setBusyId('') }
+    finally { if (activeUserIdRef.current === actorUserId) setBusyId('') }
   }
 
   const cancel = async (inviteId: string) => {
+    const actorUserId = userId
+    if (!actorUserId) return
     setBusyId(inviteId); setError('')
     try { await cancelGameInvite(inviteId); await refresh(true) }
-    catch (cause) { setError(inviteErrorMessage(cause)) }
-    finally { setBusyId('') }
+    catch (cause) { if (activeUserIdRef.current === actorUserId) setError(inviteErrorMessage(cause)) }
+    finally { if (activeUserIdRef.current === actorUserId) setBusyId('') }
   }
 
   if (!user) return null
