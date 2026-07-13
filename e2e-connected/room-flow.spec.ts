@@ -22,6 +22,19 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     page.on('pageerror', error => runtimeErrors.push(error.message))
     await page.addInitScript(() => {
       Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: undefined })
+      const trackedWindow = window as Window & { gameViewReads?: number }
+      const originalFetch = window.fetch.bind(window)
+      trackedWindow.gameViewReads = 0
+      window.fetch = async (...args) => {
+        const response = await originalFetch(...args)
+        const input = args[0]
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        if (sessionStorage.getItem('delay-game-view') === 'true' && url.includes('/rest/v1/games?') && new URL(url).searchParams.get('select')?.includes('card_set_snapshot')) {
+          trackedWindow.gameViewReads = (trackedWindow.gameViewReads ?? 0) + 1
+          await new Promise(resolve => window.setTimeout(resolve, 1_200))
+        }
+        return response
+      }
     })
   }
 
@@ -112,11 +125,14 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
 
     const start = host.getByRole('button', { name: '게임 시작', exact: true })
     await expect(start).toBeEnabled()
+    await Promise.all([host.evaluate(() => sessionStorage.setItem('delay-game-view', 'true')), guest.evaluate(() => sessionStorage.setItem('delay-game-view', 'true'))])
     await start.click()
     await expect(host).toHaveURL(/\/game\?game=[0-9a-f-]+$/)
     await expect(guest).toHaveURL(/\/game\?game=[0-9a-f-]+$/)
     await expect(host.getByText('LIVE GAME')).toBeVisible()
     await expect(guest.getByText('LIVE GAME')).toBeVisible()
+    expect(await host.evaluate(() => (window as Window & { gameViewReads?: number }).gameViewReads)).toBe(1)
+    expect(await guest.evaluate(() => (window as Window & { gameViewReads?: number }).gameViewReads)).toBe(1)
     expect(new URL(await host.url()).searchParams.get('game')).toBe(new URL(await guest.url()).searchParams.get('game'))
 
     const hostDeck = host.getByRole('button', { name: /눌러서 뒤집기/ })

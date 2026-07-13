@@ -75,9 +75,12 @@ export default function Game() {
   const [roomBusy, setRoomBusy] = useState(false)
   const tableRef = useRef<GameTableCard[]>([])
   const versionRef = useRef<number | null>(null)
+  const activeGameIdRef = useRef(gameId)
+  const gameViewRequestRef = useRef<{ gameId: string; promise: ReturnType<typeof loadGameView> } | null>(null)
   const [practice, setPractice] = useState(() => createPracticeGame())
   const [practicePauseVersion, setPracticePauseVersion] = useState<number | null>(null)
   const practiceRef = useRef(practice)
+  activeGameIdRef.current = gameId
   const botActionVersionRef = useRef<number | null>(null)
   const forcedBotRingUsedRef = useRef(false)
   const practiceBusyRef = useRef(false)
@@ -122,10 +125,26 @@ export default function Game() {
     setBusy(false)
   }, [])
 
-  const refresh = useCallback(async () => {
+  const requestGameView = useCallback(() => {
+    if (!gameId) return null
+    if (gameViewRequestRef.current?.gameId === gameId) return gameViewRequestRef.current.promise
+    const promise = loadGameView(gameId).finally(() => {
+      if (gameViewRequestRef.current?.promise === promise) gameViewRequestRef.current = null
+    })
+    gameViewRequestRef.current = { gameId, promise }
+    return promise
+  }, [gameId])
+
+  const refresh = useCallback(async (ensureFresh = false) => {
     if (!gameId || isBotMode) return
+    if (ensureFresh && gameViewRequestRef.current?.gameId === gameId) {
+      await gameViewRequestRef.current.promise.catch(() => undefined)
+    }
     try {
-      const view = await loadGameView(gameId)
+      const request = requestGameView()
+      if (!request) return
+      const view = await request
+      if (activeGameIdRef.current !== gameId) return
       if (versionRef.current !== null && view.state.version !== versionRef.current) {
         const result = view.state.lastResult
         if (result?.type === 'reveal') {
@@ -163,7 +182,7 @@ export default function Game() {
       } else if (view.state.currentTurn === user?.id) setMessage('내 차례예요. 아래 카드 더미를 누르세요.')
       else setMessage('상대방이 카드를 뒤집을 차례예요.')
     } catch (caught) { setMessage(gameErrorMessage(caught)) }
-  }, [animateCards, gameId, isBotMode, navigate, showImpact, user?.id])
+  }, [animateCards, gameId, isBotMode, navigate, requestGameView, showImpact, user?.id])
 
   const connection = useSessionHeartbeat('game', isBotMode ? null : gameId, () => void refresh())
 
@@ -307,7 +326,7 @@ export default function Game() {
     }
     if (!gameId) return
     setBusy(true)
-    try { await animateCards('play-player', 460); setState(await revealGameCard(gameId)); await refresh() }
+    try { await animateCards('play-player', 460); setState(await revealGameCard(gameId)); await refresh(true) }
     catch (caught) { setMessage(gameErrorMessage(caught)) }
     finally { setBusy(false) }
   }
@@ -350,7 +369,7 @@ export default function Game() {
         playGameSound(result.correct ? 'correct' : 'wrong', settings)
         vibrateGame(result.correct ? [45, 35, 70] : 140, settings)
       }
-      await refresh()
+      await refresh(true)
     } catch (caught) { setMessage(gameErrorMessage(caught)) }
     finally { setBusy(false) }
   }
