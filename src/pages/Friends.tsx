@@ -23,7 +23,7 @@ import { disablePushNotifications, enablePushNotifications, getPushNotificationS
 import { getErrorMessage } from '../lib/errorMessage'
 
 const EMPTY_OVERVIEW: FriendOverview = { friends: [], received: [], sent: [], blocked: [] }
-type PushState = 'loading' | 'unsupported' | 'disabled' | 'enabled'
+type PushState = 'loading' | 'unsupported' | 'disabled' | 'enabled' | 'error'
 
 function avatarClass(seed: string) {
   const value = [...seed].reduce((sum, character) => sum + character.charCodeAt(0), 0)
@@ -63,9 +63,12 @@ export default function Friends() {
   const [error, setError] = useState('')
   const [overviewError, setOverviewError] = useState('')
   const [inviteContext, setInviteContext] = useState<GameInviteContext>({ available: false })
+  const [inviteContextError, setInviteContextError] = useState('')
   const [pushState, setPushState] = useState<PushState>('loading')
   const [pushBusy, setPushBusy] = useState(false)
   const overviewPromiseRef = useRef<Promise<FriendOverview> | null>(null)
+  const inviteContextPromiseRef = useRef<Promise<GameInviteContext> | null>(null)
+  const pushStatusPromiseRef = useRef<ReturnType<typeof getPushNotificationStatus> | null>(null)
 
   const requestOverview = useCallback(() => {
     if (!overviewPromiseRef.current) {
@@ -86,18 +89,40 @@ export default function Friends() {
     }
   }, [requestOverview])
 
+  const loadInviteContext = useCallback(async () => {
+    if (!inviteContextPromiseRef.current) {
+      inviteContextPromiseRef.current = getGameInviteContext().finally(() => { inviteContextPromiseRef.current = null })
+    }
+    try {
+      setInviteContext(await inviteContextPromiseRef.current)
+      setInviteContextError('')
+    } catch {
+      setInviteContext({ available: false })
+      setInviteContextError('게임 초대 가능 여부를 확인하지 못했어요.')
+    }
+  }, [])
+
+  const loadPushState = useCallback(async () => {
+    setPushState('loading')
+    if (!pushStatusPromiseRef.current) {
+      pushStatusPromiseRef.current = getPushNotificationStatus().finally(() => { pushStatusPromiseRef.current = null })
+    }
+    try { setPushState(await pushStatusPromiseRef.current) }
+    catch { setPushState('error') }
+  }, [])
+
   useEffect(() => {
     if (!user) return
     void loadOverview()
-    void getGameInviteContext().then(setInviteContext).catch(() => setInviteContext({ available: false }))
-    void getPushNotificationStatus().then(setPushState).catch(() => setPushState('disabled'))
+    void loadInviteContext()
+    void loadPushState()
     const unsubscribeChanges = subscribeToFriendChanges(user.id, () => void loadOverview())
     const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers)
     return () => {
       unsubscribeChanges()
       unsubscribePresence()
     }
-  }, [loadOverview, user])
+  }, [loadInviteContext, loadOverview, loadPushState, user])
 
   const refreshSearch = useCallback(async () => {
     if (query.trim().length < 2) return
@@ -145,6 +170,7 @@ export default function Friends() {
   const onlineFriendCount = overview.friends.filter(friend => onlineUsers.has(friend.userId)).length
   const togglePush = async () => {
     if (!user || pushBusy || pushState === 'loading' || pushState === 'unsupported') return
+    if (pushState === 'error') { await loadPushState(); return }
     setPushBusy(true)
     setError(''); setMessage('')
     try {
@@ -177,12 +203,13 @@ export default function Friends() {
           <button type="submit" aria-label="친구 검색" disabled={searching}>{searching ? <LoaderCircle className="is-spinning" /> : <UserPlus />}</button>
         </form>
         <button className={`push-enable ${pushState === 'enabled' ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushBusy || pushState === 'loading' || pushState === 'unsupported'}>
-          <BellRing /> {pushBusy ? '알림 변경 중' : pushState === 'loading' ? '알림 확인 중' : pushState === 'unsupported' ? '이 브라우저는 알림 미지원' : pushState === 'enabled' ? '초대 알림 끄기' : '초대 알림 켜기'}
+          <BellRing /> {pushBusy ? '알림 변경 중' : pushState === 'loading' ? '알림 확인 중' : pushState === 'unsupported' ? '이 브라우저는 알림 미지원' : pushState === 'error' ? '알림 상태 다시 확인' : pushState === 'enabled' ? '초대 알림 끄기' : '초대 알림 켜기'}
         </button>
       </div>
 
       {(message || error) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
       {overviewError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{overviewError}</span><button onClick={() => void loadOverview()}>다시 불러오기</button></div>}
+      {inviteContextError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{inviteContextError}</span><button onClick={() => void loadInviteContext()}>초대 상태 다시 확인</button></div>}
 
       {query.trim().length > 0 && (
         <section className="friends-list search-results" aria-labelledby="search-results-title">
