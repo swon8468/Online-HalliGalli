@@ -69,6 +69,7 @@ export default function Friends() {
   const overviewPromiseRef = useRef<Promise<FriendOverview> | null>(null)
   const inviteContextPromiseRef = useRef<Promise<GameInviteContext> | null>(null)
   const pushStatusPromiseRef = useRef<ReturnType<typeof getPushNotificationStatus> | null>(null)
+  const searchVersionRef = useRef(0)
 
   const requestOverview = useCallback(() => {
     if (!overviewPromiseRef.current) {
@@ -126,7 +127,9 @@ export default function Friends() {
 
   const refreshSearch = useCallback(async () => {
     if (query.trim().length < 2) return
-    setResults(await searchFriendUsers(query))
+    const version = ++searchVersionRef.current
+    const next = await searchFriendUsers(query)
+    if (searchVersionRef.current === version) setResults(next)
   }, [query])
 
   const runAction = async (key: string, action: () => Promise<unknown>, success: string) => {
@@ -151,19 +154,32 @@ export default function Friends() {
     setMessage('')
     setError('')
     if (query.trim().length < 2) {
+      searchVersionRef.current += 1
       setResults([])
       setError('닉네임 또는 친구 태그를 2자 이상 입력해 주세요.')
       return
     }
+    const version = ++searchVersionRef.current
+    const searchQuery = query.trim()
     setSearching(true)
     try {
-      setResults(await searchFriendUsers(query))
+      const next = await searchFriendUsers(searchQuery)
+      if (searchVersionRef.current === version) setResults(next)
     } catch (cause) {
-      setResults([])
-      setError(friendErrorMessage(cause))
+      if (searchVersionRef.current === version) {
+        setResults([])
+        setError(friendErrorMessage(cause))
+      }
     } finally {
-      setSearching(false)
+      if (searchVersionRef.current === version) setSearching(false)
     }
+  }
+
+  const changeQuery = (value: string) => {
+    searchVersionRef.current += 1
+    setQuery(value)
+    setResults([])
+    setSearching(false)
   }
 
   const requestCount = overview.received.length + overview.sent.length
@@ -199,7 +215,7 @@ export default function Friends() {
         <form className="search-field" onSubmit={handleSearch} role="search">
           <Search aria-hidden="true" />
           <label className="sr-only" htmlFor="friend-search">친구 닉네임 또는 태그</label>
-          <input id="friend-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="닉네임 또는 태그 검색" autoComplete="off" />
+          <input id="friend-search" value={query} onChange={event => changeQuery(event.target.value)} placeholder="닉네임 또는 태그 검색" autoComplete="off" />
           <button type="submit" aria-label="친구 검색" disabled={searching}>{searching ? <LoaderCircle className="is-spinning" /> : <UserPlus />}</button>
         </form>
         <button className={`push-enable ${pushState === 'enabled' ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushBusy || pushState === 'loading' || pushState === 'unsupported'}>
