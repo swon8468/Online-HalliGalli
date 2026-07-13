@@ -35,8 +35,10 @@ export default function RoomLobby() {
   const [confirmAction, setConfirmAction] = useState<'leave' | 'close' | null>(null)
   const [kickTarget, setKickTarget] = useState<RoomMemberInfo | null>(null)
   const [kickReason, setKickReason] = useState('')
-  const refreshPromiseRef = useRef<Promise<void> | null>(null)
+  const activeRoomIdRef = useRef(roomId)
+  const refreshPromiseRef = useRef<{ roomId: string; promise: Promise<void> } | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
+  activeRoomIdRef.current = roomId
 
   const resetCopied = () => {
     if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
@@ -55,36 +57,43 @@ export default function RoomLobby() {
 
   const refresh = useCallback(async (ensureFresh = false) => {
     if (!roomId) return
-    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current
-    if (refreshPromiseRef.current) return refreshPromiseRef.current
+    if (ensureFresh && refreshPromiseRef.current?.roomId === roomId) await refreshPromiseRef.current.promise
+    if (refreshPromiseRef.current?.roomId === roomId) return refreshPromiseRef.current.promise
     const request = (async () => {
       try {
         const [nextRoom, nextPlayers] = await Promise.all([loadRoom(roomId), loadRoomMembers(roomId)])
+        if (activeRoomIdRef.current !== roomId) return
         if (user && !nextPlayers.some(player => player.userId === user.id)) {
           const removal = await getMyRoomRemoval(roomId).catch(() => ({ kicked: false, reason: undefined, left: false }))
+          if (activeRoomIdRef.current !== roomId) return
           const query = new URLSearchParams({ reason: removal.kicked ? 'kicked' : 'removed' })
           if (removal.reason) query.set('detail', removal.reason)
           navigate(`/join?${query}`, { replace: true }); return
         }
         if (nextRoom.status === 'playing') {
           const gameId = await loadRoomGame(roomId)
+          if (activeRoomIdRef.current !== roomId) return
           if (gameId) { navigate(`/game?game=${encodeURIComponent(gameId)}`, { replace: true }); return }
         }
         if (nextRoom.status === 'closed') { navigate('/join?reason=closed', { replace: true }); return }
         setRoom(nextRoom); setPlayers(nextPlayers); setError('')
-      } catch (cause) { setError(roomErrorMessage(cause)) }
-      finally { setLoading(false) }
+      } catch (cause) {
+        if (activeRoomIdRef.current === roomId) setError(roomErrorMessage(cause))
+      } finally {
+        if (activeRoomIdRef.current === roomId) setLoading(false)
+      }
     })()
-    refreshPromiseRef.current = request
+    refreshPromiseRef.current = { roomId, promise: request }
     try {
       await request
     } finally {
-      if (refreshPromiseRef.current === request) refreshPromiseRef.current = null
+      if (refreshPromiseRef.current?.promise === request) refreshPromiseRef.current = null
     }
   }, [navigate, roomId, user])
 
   const connection = useSessionHeartbeat('room', roomId, () => void refresh())
   useEffect(() => {
+    setLoading(true); setRoom(null); setPlayers([]); setError('')
     void refresh()
     if (!roomId) return
     const unsubscribe = subscribeToRoom(roomId, () => void refresh())
@@ -129,7 +138,7 @@ export default function RoomLobby() {
   const leave = () => room && void run(async () => { await leaveRoom(room.id); navigate('/', { replace: true }) })
   const close = () => room && void run(async () => { await closeWaitingRoom(room.id); navigate('/', { replace: true }) })
 
-  if (loading) return <div className="content-page narrow-page play-flow-page"><section className="form-card admin-empty" aria-live="polite"><strong>대기방을 불러오는 중...</strong></section></div>
+  if (loading || (room && room.id !== roomId)) return <div className="content-page narrow-page play-flow-page"><section className="form-card admin-empty" aria-live="polite"><strong>대기방을 불러오는 중...</strong></section></div>
   if (!room) return <div className="content-page narrow-page play-flow-page"><section className="form-card admin-empty"><strong>대기방을 찾지 못했어요.</strong><p>{error}</p><button className="secondary-button" onClick={() => navigate('/')}>홈으로 돌아가기</button></section></div>
 
   const isHost = room.hostId === user?.id
