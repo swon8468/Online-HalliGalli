@@ -86,14 +86,32 @@ Deno.serve(async request => {
   const message = JSON.stringify({ title: '게임 초대', body: `${senderResult.data?.nickname ?? '친구'}님이 게임에 초대했어요.`, url: `/join?invite=${invite.id}`, tag: `invite-${invite.id}` })
 
   let delivered = 0
+  let transientFailures = 0
   for (const subscription of subscriptions) {
-    try {
-      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, message)
-      delivered += 1
-    } catch (caught) {
-      const statusCode = typeof caught === 'object' && caught && 'statusCode' in caught ? Number(caught.statusCode) : 0
-      if (statusCode === 404 || statusCode === 410) await admin.from('push_subscriptions').delete().eq('id', subscription.id)
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, message)
+        delivered += 1
+        break
+      } catch (caught) {
+        const statusCode = typeof caught === 'object' && caught && 'statusCode' in caught ? Number(caught.statusCode) : 0
+        if (statusCode === 404 || statusCode === 410) {
+          await admin.from('push_subscriptions').delete().eq('id', subscription.id)
+          break
+        }
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 250))
+        else transientFailures += 1
+      }
     }
+  }
+
+  if (delivered === 0 && transientFailures > 0) {
+    const released = await admin.from('game_invites')
+      .update({ push_sent_at: null })
+      .eq('id', invite.id)
+      .eq('push_sent_at', sentAt)
+    if (released.error) return Response.json({ error: 'push_claim_release_failed' }, { status: 500, headers })
+    return Response.json({ error: 'push_temporarily_unavailable', retryable: true }, { status: 503, headers })
   }
 
   return Response.json({ delivered, duplicate: false }, { headers })

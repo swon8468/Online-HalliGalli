@@ -116,7 +116,30 @@ try {
   const claimedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', inviteResult.data.id).single()
   if (claimedInvite.error || !claimedInvite.data.push_sent_at) throw claimedInvite.error ?? new Error('푸시 전송 claim 기록 실패')
 
-  console.log('verified authenticated push registration, shared-device endpoint reassignment, inactive-session denial, RLS ownership, and idempotent invite delivery')
+  const cancelled = await admin.from('game_invites').update({ status: 'cancelled' }).eq('id', inviteResult.data.id)
+  if (cancelled.error) throw cancelled.error
+  const retryInvite = await admin.from('game_invites').insert({
+    sender_id: createdIds[0], receiver_id: createdIds[1], room_id: roomId,
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+  }).select('id').single()
+  if (retryInvite.error) throw retryInvite.error
+  const transientEndpoint = `https://push.test.invalid/transient/${randomUUID()}`
+  const transientSubscription = await admin.from('push_subscriptions').insert({
+    user_id: createdIds[1], endpoint: transientEndpoint, p256dh: 'p'.repeat(64), auth: 'a'.repeat(24), user_agent: 'transient-release-test',
+  })
+  if (transientSubscription.error) throw transientSubscription.error
+  const transientDelivery = await clients[0].functions.invoke('send-push', { body: { inviteId: retryInvite.data.id } })
+  if (!transientDelivery.error) throw new Error('일시 푸시 실패가 성공으로 보고되었습니다.')
+  const releasedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', retryInvite.data.id).single()
+  if (releasedInvite.error || releasedInvite.data.push_sent_at) throw releasedInvite.error ?? new Error('일시 실패 후 푸시 선점이 해제되지 않았습니다.')
+  const removedTransient = await admin.from('push_subscriptions').delete().eq('endpoint', transientEndpoint)
+  if (removedTransient.error) throw removedTransient.error
+  const retriedDelivery = await clients[0].functions.invoke('send-push', { body: { inviteId: retryInvite.data.id } })
+  if (retriedDelivery.error || retriedDelivery.data?.duplicate !== false) throw retriedDelivery.error ?? new Error('선점 해제 후 푸시 재호출 실패')
+  const reclaimedInvite = await admin.from('game_invites').select('push_sent_at').eq('id', retryInvite.data.id).single()
+  if (reclaimedInvite.error || !reclaimedInvite.data.push_sent_at) throw reclaimedInvite.error ?? new Error('재호출 후 푸시 선점 기록 실패')
+
+  console.log('verified authenticated push registration, shared-device endpoint reassignment, inactive-session denial, RLS ownership, idempotent delivery, and transient retry release')
 } finally {
   if (roomId) await admin.from('rooms').delete().eq('id', roomId)
   for (const id of createdIds) await admin.auth.admin.deleteUser(id)
