@@ -96,3 +96,31 @@ test('늦은 이전 스페이스 카드 응답이 새 스페이스 목록을 덮
   await expect(page.getByText('최신 스페이스 카드')).toBeVisible()
   await expect(page.getByText('이전 스페이스 카드')).toHaveCount(0)
 })
+
+test('이전 카드 라이브러리의 늦은 생성 완료가 새 스페이스 필터에 섞이지 않는다', async ({ page }) => {
+  await login(page)
+  const destinationSpace = '00000000-0000-4000-8000-000000000033'
+  let createStarted = false
+
+  await page.goto('/cards')
+  await page.getByRole('button', { name: '새 카드 세트' }).click()
+  await page.getByLabel('이름').fill('E2E 이전 범위 카드')
+  await page.route('**/rest/v1/rpc/create_card_set', async route => {
+    createStarted = true
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    await route.continue()
+  })
+  await page.getByRole('dialog').getByRole('button', { name: '생성', exact: true }).click()
+  await expect.poll(() => createStarted).toBe(true)
+
+  await page.evaluate(spaceId => {
+    history.pushState({}, '', `/cards?space=${spaceId}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, destinationSpace)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByText('스페이스 카드 라이브러리')).toBeVisible()
+  await page.waitForTimeout(1_300)
+  await expect(page.getByText('초안 카드 세트를 만들었어요.')).toHaveCount(0)
+  await expect(page.getByText('E2E 이전 범위 카드')).toHaveCount(0)
+  await expect(page).toHaveURL(`/cards?space=${destinationSpace}`)
+})
