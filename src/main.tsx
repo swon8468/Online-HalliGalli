@@ -7,6 +7,7 @@ import App from './App'
 import { AuthProvider } from './auth/AuthContext'
 import { isAdminHostname } from './lib/environment'
 import AppErrorBoundary from './components/AppErrorBoundary'
+import E2ECrashProbe from './components/E2ECrashProbe'
 import './styles.css'
 
 const updateSW = registerSW({
@@ -19,11 +20,13 @@ window.__halliGalliUpdateSW = updateSW
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
-      <BrowserRouter>
-        <AuthProvider>
-          {isAdminHostname() ? <AdminApp /> : <App />}
-        </AuthProvider>
-      </BrowserRouter>
+      <E2ECrashProbe>
+        <BrowserRouter>
+          <AuthProvider>
+            {isAdminHostname() ? <AdminApp /> : <App />}
+          </AuthProvider>
+        </BrowserRouter>
+      </E2ECrashProbe>
     </AppErrorBoundary>
   </StrictMode>,
 )

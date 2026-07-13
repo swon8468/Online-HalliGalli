@@ -5,7 +5,11 @@ type Props = { children: ReactNode }
 type State = { failed: boolean; incidentId: string }
 
 function createIncidentId() {
-  return `UI-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`
+  const generated = globalThis.crypto?.randomUUID?.()
+  const randomPart = generated
+    ? generated.slice(0, 6)
+    : Math.random().toString(36).slice(2, 8).padEnd(6, '0')
+  return `UI-${Date.now().toString(36).toUpperCase()}-${randomPart.toUpperCase()}`
 }
 
 export default class AppErrorBoundary extends Component<Props, State> {
