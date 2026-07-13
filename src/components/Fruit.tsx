@@ -4,6 +4,7 @@ interface FruitProps {
   kind: FruitKind
   count?: number
   size?: 'small' | 'large'
+  decorative?: boolean
 }
 
 function FruitShape({ kind }: { kind: FruitKind }) {
@@ -43,9 +44,9 @@ function FruitShape({ kind }: { kind: FruitKind }) {
   )
 }
 
-export function Fruit({ kind, count = 1, size = 'small' }: FruitProps) {
+export function Fruit({ kind, count = 1, size = 'small', decorative = false }: FruitProps) {
   return (
-    <div className={`fruit-cluster fruit-cluster--${size} fruit-cluster--${count}`} aria-label={`${kind} ${count}개`}>
+    <div className={`fruit-cluster fruit-cluster--${size} fruit-cluster--${count}`} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : `${kind} ${count}개`}>
       {Array.from({ length: count }, (_, index) => <FruitShape kind={kind} key={index} />)}
     </div>
   )

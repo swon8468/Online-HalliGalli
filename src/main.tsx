@@ -6,16 +6,24 @@ import AdminApp from './admin/AdminApp'
 import App from './App'
 import { AuthProvider } from './auth/AuthContext'
 import { isAdminHostname } from './lib/environment'
+import AppErrorBoundary from './components/AppErrorBoundary'
 import './styles.css'
 
-registerSW({ immediate: true })
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() { window.__halliGalliUpdateSW = updateSW; window.dispatchEvent(new Event('halli-galli:pwa-update')) },
+  onOfflineReady() { window.dispatchEvent(new Event('halli-galli:pwa-offline-ready')) },
+})
+window.__halliGalliUpdateSW = updateSW
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        {isAdminHostname() ? <AdminApp /> : <App />}
-      </AuthProvider>
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          {isAdminHostname() ? <AdminApp /> : <App />}
+        </AuthProvider>
+      </BrowserRouter>
+    </AppErrorBoundary>
   </StrictMode>,
 )

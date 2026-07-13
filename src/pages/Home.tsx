@@ -1,21 +1,37 @@
-import { ArrowRight, BookOpen, Bot, DoorOpen, Radio, Sparkles, UsersRound } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { ArrowRight, BookOpen, Bot, Building2, DoorOpen, Radio, Sparkles } from 'lucide-react'
+import { useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 import { Fruit } from '../components/Fruit'
+import { findMyActiveSession } from '../lib/rooms'
 
 const menuItems = [
   { to: '/create', icon: Sparkles, title: '방 만들기', copy: '친구들을 초대하고 바로 시작하세요.', tone: 'blue' },
   { to: '/join', icon: DoorOpen, title: '방 참여하기', copy: '6자리 초대 코드로 입장하세요.', tone: 'dark' },
   { to: '/online', icon: Radio, title: '온라인', copy: '새로운 플레이어와 빠르게 매칭하세요.', tone: 'light' },
   { to: '/rules', icon: BookOpen, title: '게임 룰', copy: '종을 울리는 완벽한 순간을 알아보세요.', tone: 'light' },
-  { to: '/practice', icon: Bot, title: '봇 연습', copy: '혼자서 규칙과 타이밍을 연습하세요.', tone: 'practice' },
+  { to: '/practice', icon: Bot, title: '봇 연습', copy: '혼자서 규칙과 타이밍을 연습하세요.', tone: 'light' },
+  { to: '/spaces', icon: Building2, title: '스페이스', copy: '단체·행사 전용 공간을 관리하세요.', tone: 'light' },
 ] as const
 
 export default function Home() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    void findMyActiveSession().then(session => {
+      if (!active || !session) return
+      navigate(session.type === 'game' ? `/game?game=${encodeURIComponent(session.gameId)}` : `/room/${encodeURIComponent(session.roomId)}`, { replace: true })
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [navigate, user])
+
   return (
     <div className="home-page">
       <section className="hero">
         <div className="hero-copy">
-          <div className="presence"><span /> 1,284명 플레이 중</div>
+          <div className="presence"><span /> 실시간 온라인</div>
           <h1>다섯이 되는 순간,<br /><em>종을 울리세요.</em></h1>
           <p>친구와 함께, 어디서든. 가장 빠른 손이 승리합니다.</p>
         </div>
@@ -43,11 +59,6 @@ export default function Home() {
         ))}
       </section>
 
-      <Link to="/friends" className="friend-strip">
-        <span className="friend-stack"><i>J</i><i>M</i><i>S</i></span>
-        <span><strong>친구 3명이 온라인이에요.</strong><small>함께 게임을 시작해 보세요.</small></span>
-        <UsersRound size={21} />
-      </Link>
     </div>
   )
 }

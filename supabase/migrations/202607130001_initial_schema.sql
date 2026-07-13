@@ -9,7 +9,7 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   nickname text not null check (char_length(nickname) between 2 and 12),
   friend_tag text not null unique,
-  avatar_seed text not null default encode(gen_random_bytes(6), 'hex'),
+  avatar_seed text not null default encode(extensions.gen_random_bytes(6), 'hex'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

@@ -1,63 +1,46 @@
-import { ArrowRight, Crown, Hash, LockKeyhole, LogOut, UserRound } from 'lucide-react'
-import { FormEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { ArrowRight, Hash, LockKeyhole } from 'lucide-react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
+import { inviteErrorMessage, respondGameInvite } from '../lib/invites'
+import { joinPrivateRoom } from '../lib/rooms'
 
 export default function JoinRoom() {
   const navigate = useNavigate()
-  const [code, setCode] = useState('')
-  const [nickname, setNickname] = useState('')
-  const [error, setError] = useState('')
-  const [joined, setJoined] = useState(false)
+  const [searchParams] = useSearchParams()
+  const initialCode = (searchParams.get('code') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+  const reason = searchParams.get('reason')
+  const detail = searchParams.get('detail')
+  const [code, setCode] = useState(initialCode)
+  const [error, setError] = useState(reason === 'kicked' ? `이 방에서 강퇴됐어요.${detail ? ` 사유: ${detail}` : ''}` : reason === 'closed' ? '방장이 방을 닫았어요.' : reason === 'removed' ? '이 방에서 나갔거나 더 이상 참여할 수 없어요.' : '')
+  const [busy, setBusy] = useState(false)
+  const handledInvite = useRef('')
 
-  const submit = (event: FormEvent) => {
+  useEffect(() => {
+    const inviteId = searchParams.get('invite')
+    if (!inviteId || handledInvite.current === inviteId) return
+    handledInvite.current = inviteId
+    setBusy(true); setError('')
+    void respondGameInvite(inviteId, true)
+      .then(result => {
+        if (result.roomId) navigate(`/room/${encodeURIComponent(result.roomId)}`, { replace: true })
+        else setError('초대받은 방을 찾지 못했어요.')
+      })
+      .catch(cause => setError(inviteErrorMessage(cause)))
+      .finally(() => setBusy(false))
+  }, [navigate, searchParams])
+
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!/^[A-Z]{3}[0-9]{3}$/.test(code)) {
-      setError('영문 대문자 3개와 숫자 3개를 입력해 주세요.')
-      return
+    if (!/^[A-Z]{3}[0-9]{3}$/.test(code)) return setError('영문 대문자 3개와 숫자 3개를 입력해 주세요.')
+    setBusy(true); setError('')
+    try { const joinedRoom = await joinPrivateRoom(code); navigate(`/room/${encodeURIComponent(joinedRoom.id)}`, { replace: true }) }
+    catch (caught) {
+      const message = caught instanceof Error ? caught.message : caught && typeof caught === 'object' && 'message' in caught ? String(caught.message) : ''
+      setError(message.includes('kicked_users_cannot_rejoin') || message.includes('kicked users cannot rejoin') ? '이 방에서 강퇴되어 다시 참여할 수 없어요.' : message.includes('room_full') || message.includes('room is full') ? '방이 가득 찼어요.' : message.includes('room_started') ? '이미 게임이 시작된 방이에요.' : message.includes('room_closed') ? '이미 닫힌 방이에요.' : message.includes('room_not_found') || message.includes('room not found') ? '방 코드를 확인해 주세요.' : message || '방에 참여하지 못했습니다.')
     }
-    if (nickname.trim().length < 2) {
-      setError('닉네임은 2자 이상 입력해 주세요.')
-      return
-    }
-    setJoined(true)
+    finally { setBusy(false) }
   }
 
-  if (joined) {
-    return (
-      <div className="content-page narrow-page play-flow-page">
-        <PageHeader eyebrow="WAITING ROOM" title="게임이 곧 시작돼요." description="방장이 게임을 시작할 때까지 잠시 기다려 주세요." />
-        <section className="member-card joined-lobby">
-          <div className="joined-room-code"><span>방 코드</span><strong>{code.slice(0, 3)}<em>{code.slice(3)}</em></strong></div>
-          <div className="section-title"><div><h2>참가자</h2><p>3 / 4명</p></div><span className="live-dot">대기 중</span></div>
-          <ul className="member-list">
-            <li><span className="avatar avatar--1">제</span><span><strong>제이미</strong><small>방장</small></span><Crown className="host-crown" /></li>
-            <li><span className="avatar avatar--2">민</span><span><strong>민서</strong><small>준비됨</small></span></li>
-            <li><span className="avatar avatar--3">{nickname[0]}</span><span><strong>{nickname}</strong><small>나 · 준비됨</small></span></li>
-            <li className="empty-member"><span className="avatar"><UserRound /></span><span>기다리는 중...</span></li>
-          </ul>
-          <button className="secondary-button full-button" onClick={() => navigate('/game')}>데모 게임 미리보기 <ArrowRight /></button>
-          <button className="danger-text-button full-button" onClick={() => setJoined(false)}><LogOut /> 방 나가기</button>
-        </section>
-      </div>
-    )
-  }
-
-  return (
-    <div className="content-page narrow-page play-flow-page">
-      <PageHeader eyebrow="JOIN ROOM" title="초대받은 방으로 들어가세요." description="친구에게 받은 6자리 코드가 필요해요." />
-      <form className="form-card join-form" onSubmit={submit}>
-        <label><span><Hash /> 방 코드</span>
-          <input className="code-input" value={code} onChange={event => { setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)); setError('') }} placeholder="ABC123" autoComplete="off" />
-        </label>
-        <label><span><UserRound /> 닉네임</span>
-          <input value={nickname} onChange={event => { setNickname(event.target.value.slice(0, 12)); setError('') }} placeholder="게임에서 사용할 이름" autoComplete="nickname" />
-          <small>{nickname.length} / 12</small>
-        </label>
-        {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button full-button" type="submit">방 참여하기 <ArrowRight /></button>
-        <p className="privacy-note"><LockKeyhole /> 닉네임은 이번 게임에만 표시돼요.</p>
-      </form>
-    </div>
-  )
+  return <div className="content-page narrow-page play-flow-page"><PageHeader eyebrow="JOIN ROOM" title="초대받은 방으로 들어가세요." description="친구에게 받은 6자리 코드가 필요해요." /><form className="form-card join-form" onSubmit={submit}><label><span><Hash /> 방 코드</span><input className="code-input" value={code} onChange={event => { setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)); setError('') }} placeholder="ABC123" autoComplete="off" /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button full-button" type="submit" disabled={busy}>{busy ? '참여하는 중...' : <>방 참여하기 <ArrowRight /></>}</button><p className="privacy-note"><LockKeyhole /> 계정 닉네임으로 참여해요.</p></form></div>
 }

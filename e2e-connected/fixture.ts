@@ -1,0 +1,100 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { createClient } from '@supabase/supabase-js'
+
+export const accounts = [
+  { email: 'e2e-browser-host@swonport.kr', nickname: 'E2E방장', role: 'super_admin' },
+  { email: 'e2e-browser-guest@swonport.kr', nickname: 'E2E참가자', role: 'player' },
+]
+
+function parseEnv(source: string) {
+  return Object.fromEntries(source.split(/\r?\n/).flatMap(line => {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
+    return match ? [[match[1], match[2].replace(/^(['"])(.*)\1$/, '$2')]] : []
+  }))
+}
+
+export async function connectedEnvironment() {
+  const fileEnv = parseEnv(await readFile('.env.development', 'utf8'))
+  const url = process.env.TEST_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL
+  const anon = process.env.TEST_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY
+  const accessToken = process.env.SUPABASE_ACCESS_TOKEN || fileEnv.SUPABASE_ACCESS_TOKEN
+  if (!url || !anon || !accessToken) throw new Error('연결형 E2E에는 개발 Supabase URL, anon key, access token이 필요합니다.')
+  const password = process.env.TEST_USER_PASSWORD || `Browser-${createHash('sha256').update(accessToken).digest('hex').slice(0, 18)}!`
+  const projectRef = new URL(url).hostname.split('.')[0]
+  const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/api-keys?reveal=true`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!response.ok) throw new Error(`개발 프로젝트 키 조회 실패 (${response.status})`)
+  const serviceKey = (await response.json()).find((key: { name?: string }) => key.name === 'service_role') as { api_key?: string; value?: string } | undefined
+  const service = serviceKey?.api_key ?? serviceKey?.value
+  if (!service) throw new Error('개발 service role 키를 찾지 못했습니다.')
+  return { url, anon, password, admin: createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } }) }
+}
+
+async function deleteTestUser(admin: Awaited<ReturnType<typeof connectedEnvironment>>['admin'], userId: string) {
+  let lastError: unknown
+  const maxAttempts = 7
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const removed = await admin.auth.admin.deleteUser(userId)
+      if (!removed.error) return
+      lastError = removed.error
+    } catch (error) { lastError = error }
+
+    await new Promise(resolve => setTimeout(resolve, Math.min(500 * (2 ** attempt), 5_000)))
+
+    // A retryable transport error can happen after Auth accepted the deletion.
+    // Confirm absence before sending another destructive request.
+    try {
+      const lookup = await admin.auth.admin.getUserById(userId)
+      if (lookup.error && lookup.error.status === 404) return
+    } catch {
+      // The Auth endpoint is still unavailable; the next bounded retry handles it.
+    }
+  }
+  throw lastError ?? new Error('연결형 E2E 계정을 삭제하지 못했습니다.')
+}
+
+export async function removeConnectedFixtures() {
+  const { admin } = await connectedEnvironment()
+  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (listed.error) throw listed.error
+  const users = listed.data.users.filter(user => accounts.some(account => account.email === user.email))
+  if (users.length) {
+    const ids = users.map(user => user.id)
+    const spaces = await admin.from('spaces').select('id').in('created_by', ids)
+    if (spaces.error) throw spaces.error
+    const spaceIds = spaces.data.map(space => space.id)
+    // actor_id is RESTRICT, so every audit row authored by the fixture admin
+    // must be removed. Do not combine this with target filters (that would use
+    // AND and leave unrelated fixture audit rows behind).
+    const removedActorAudit = await admin.from('moderation_actions').delete().in('actor_id', ids)
+    if (removedActorAudit.error) throw removedActorAudit.error
+    if (spaceIds.length) {
+      const removedSpaceAudit = await admin.from('moderation_actions').delete().in('target_space_id', spaceIds)
+      if (removedSpaceAudit.error) throw removedSpaceAudit.error
+    }
+    const rooms = await admin.from('rooms').select('id').in('host_id', ids)
+    if (rooms.error) throw rooms.error
+    if (rooms.data.length) {
+      const removedRooms = await admin.from('rooms').delete().in('id', rooms.data.map(room => room.id))
+      if (removedRooms.error) throw removedRooms.error
+    }
+    const removedCardSets = await admin.from('card_sets').delete().in('created_by', ids).eq('is_platform_default', false)
+    if (removedCardSets.error) throw removedCardSets.error
+    if (spaceIds.length) {
+      const removedSpaces = await admin.from('spaces').delete().in('id', spaceIds)
+      if (removedSpaces.error) throw removedSpaces.error
+    }
+    for (const user of users) {
+      await deleteTestUser(admin, user.id)
+    }
+  }
+}
+
+export async function assertConnectedFixturesRemoved() {
+  const { admin } = await connectedEnvironment()
+  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (listed.error) throw listed.error
+  const leftovers = listed.data.users.filter(user => accounts.some(account => account.email === user.email))
+  if (leftovers.length) throw new Error(`연결형 E2E 계정 ${leftovers.length}개가 정리되지 않았습니다.`)
+}
