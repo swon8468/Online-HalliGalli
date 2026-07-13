@@ -1,5 +1,5 @@
 import { Brush, Copy, Plus, ShieldCheck, Trash2 } from 'lucide-react'
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
@@ -23,12 +23,20 @@ export default function CardSets() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [spaceId, setSpaceId] = useState(requestedSpace ?? '')
+  const refreshPromiseRef = useRef<Promise<{ cards: CardSetSummary[]; memberships: MySpace[] }> | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (ensureFresh = false) => {
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    setLoading(true)
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = Promise.all([listCardSets(requestedSpace), fetchMySpaces()])
+        .then(([cards, memberships]) => ({ cards, memberships }))
+        .finally(() => { refreshPromiseRef.current = null })
+    }
     try {
-      const [cards, memberships] = await Promise.all([listCardSets(requestedSpace), fetchMySpaces()])
-      setSets(cards); setSpaces(memberships.filter(space => ['owner', 'manager'].includes(space.role) && space.status === 'active'))
-    } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 불러오지 못했어요.')) }
+      const { cards, memberships } = await refreshPromiseRef.current
+      setSets(cards); setSpaces(memberships.filter(space => ['owner', 'manager'].includes(space.role) && space.status === 'active')); setError('')
+    } catch { setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
     finally { setLoading(false) }
   }, [requestedSpace])
   useEffect(() => { void refresh() }, [refresh])
@@ -39,14 +47,14 @@ export default function CardSets() {
     try {
       if (modal === 'clone' && source) await cloneCardSet(source.id, name, spaceId || null)
       else await createCardSet(name, description, spaceId || null)
-      setModal(null); await refresh(); setMessage(modal === 'clone' ? '카드 세트를 복제했어요.' : '초안 카드 세트를 만들었어요.')
+      setModal(null); await refresh(true); setMessage(modal === 'clone' ? '카드 세트를 복제했어요.' : '초안 카드 세트를 만들었어요.')
     } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 만들지 못했어요.')) }
     finally { setBusy(false) }
   }
   const remove = async () => {
     if (!deleteTarget) return
     setBusy(true); setError(''); setMessage('')
-    try { await deleteCardSet(deleteTarget.id); setDeleteTarget(null); await refresh(); setMessage('카드 세트를 삭제했어요.') }
+    try { await deleteCardSet(deleteTarget.id); setDeleteTarget(null); await refresh(true); setMessage('카드 세트를 삭제했어요.') }
     catch (cause) { setError(getErrorMessage(cause, '삭제하지 못했어요.')) }
     finally { setBusy(false) }
   }
@@ -55,6 +63,7 @@ export default function CardSets() {
 
   return <div className="content-page card-library-page"><PageHeader eyebrow="CARD STUDIO" title="게임의 표정을 디자인해요." description="과일 앞면과 카드 뒷면을 만들고, 게시 버전을 안전하게 관리하세요." />
     {(error || message) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
+    {error && !loading && <button className="secondary-button resource-retry" onClick={() => void refresh()}>카드 세트 다시 불러오기</button>}
     <section className="card-library-toolbar"><div><ShieldCheck /><span><strong>{requestedSpace ? '스페이스 카드 라이브러리' : '사용 가능한 카드 라이브러리'}</strong><small>게시된 카드만 실제 방에서 선택할 수 있습니다.</small></span></div>{canCreate && <button className="primary-button" onClick={openCreate}><Plus /> 새 카드 세트</button>}</section>
     {loading ? <div className="admin-loading"><span /><span /><span /></div> : sets.length ? <section className="card-library-grid">{sets.map(card => <article key={card.id}><div className="card-library-preview" style={{ background: card.backDesign.background ?? '#0878dd', color: card.backDesign.accent ?? '#fff' }}><Brush /><span>HALLI</span></div><div><i className={`card-status card-status--${card.status}`}>{card.status === 'published' ? '게시됨' : card.status === 'draft' ? '초안' : '보관'}</i><h2>{card.name}</h2><p>{card.description || '설명이 없습니다.'}</p><small>{card.isPlatformDefault ? '플랫폼 기본' : card.spaceName ?? '플랫폼'} · v{card.version}</small></div><div className="card-library-actions"><Link to={`/cards/${encodeURIComponent(card.id)}`}><Brush /> {card.isPlatformDefault && !canCreatePlatform ? '미리보기' : '편집'}</Link>{canCreate && <button onClick={() => openClone(card)}><Copy /> 복제</button>}{!card.isPlatformDefault && <button className="is-danger" onClick={() => setDeleteTarget(card)}><Trash2 /> 삭제</button>}</div></article>)}</section> : <div className="admin-empty"><Brush /><strong>카드 세트가 없어요.</strong><p>새 카드 세트를 만들면 기본 56장 구성이 복사됩니다.</p></div>}
     {modal && <div className="admin-modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><form className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="card-set-modal-title" onSubmit={submit}><span>{modal === 'clone' ? <Copy /> : <Brush />}</span><h2 id="card-set-modal-title">{modal === 'clone' ? '카드 세트 복제' : '새 카드 세트'}</h2><p>기본 56장 구성을 가진 초안으로 시작합니다.</p><label>이름<input value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={80} required /></label>{modal === 'create' && <label>설명<textarea rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label>}<label>소속<select value={spaceId} onChange={event => setSpaceId(event.target.value)} required={!canCreatePlatform}>{canCreatePlatform && <option value="">플랫폼</option>}{spaces.map(space => <option value={space.id} key={space.id}>{space.name}</option>)}</select></label><div><button data-dialog-dismiss type="button" className="secondary-button" onClick={() => setModal(null)}>취소</button><button className="full-button" disabled={busy}>{busy ? '처리 중...' : modal === 'clone' ? '복제' : '생성'}</button></div></form></div>}

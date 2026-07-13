@@ -1,5 +1,5 @@
 import { ArrowLeft, Brush, CheckCircle2, Copy, ImageUp, Layers3, Save, Send, SlidersHorizontal, Undo2, X } from 'lucide-react'
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Fruit } from '../components/Fruit'
 import { getErrorMessage } from '../lib/errorMessage'
@@ -24,17 +24,23 @@ export default function CardDesigner() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [propertiesOpen, setPropertiesOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const refreshPromiseRef = useRef<ReturnType<typeof loadCardSet> | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (ensureFresh = false) => {
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    setLoading(true)
+    if (!refreshPromiseRef.current) refreshPromiseRef.current = loadCardSet(cardSetId).finally(() => { refreshPromiseRef.current = null })
     try {
-      const value = await loadCardSet(cardSetId); setCardSet(value); setName(value.name); setDescription(value.description ?? ''); setBackAssetPath(value.backAssetPath); setBackBackground(value.backDesign.background ?? '#0878dd'); setBackAccent(value.backDesign.accent ?? '#ffffff'); setDesigns(value.designs)
-    } catch (cause) { setError(getErrorMessage(cause, '카드 세트를 불러오지 못했어요.')) }
+      const value = await refreshPromiseRef.current; setCardSet(value); setName(value.name); setDescription(value.description ?? ''); setBackAssetPath(value.backAssetPath); setBackBackground(value.backDesign.background ?? '#0878dd'); setBackAccent(value.backDesign.accent ?? '#ffffff'); setDesigns(value.designs); setError('')
+    } catch { setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
+    finally { setLoading(false) }
   }, [cardSetId])
   useEffect(() => { void refresh() }, [refresh])
   const selected = useMemo(() => designs.find(design => design.id === selectedId) ?? null, [designs, selectedId])
   const editable = Boolean(cardSet?.canManage && cardSet.status !== 'published' && !cardSet.isPlatformDefault)
   const updateSelected = (patch: Partial<CardDesignRecord>) => { if (!selected) return; setDesigns(items => items.map(item => item.id === selected.id ? { ...item, ...patch } : item)) }
-  const run = async (key: string, action: () => Promise<void>, success: string) => { setBusy(key); setError(''); setMessage(''); try { await action(); await refresh(); setMessage(success) } catch (cause) { setError(getErrorMessage(cause, '작업을 완료하지 못했어요.')) } finally { setBusy('') } }
+  const run = async (key: string, action: () => Promise<void>, success: string) => { setBusy(key); setError(''); setMessage(''); try { await action(); await refresh(true); setMessage(success) } catch (cause) { setError(getErrorMessage(cause, '작업을 완료하지 못했어요.')) } finally { setBusy('') } }
   const save = () => void run('save', async () => {
     if (!cardSet) return
     await saveCardSetMeta(cardSet.id, { name, description, backAssetPath, backDesign: { ...cardSet.backDesign, background: backBackground, accent: backAccent } })
@@ -50,7 +56,7 @@ export default function CardDesigner() {
     } catch (cause) { setError(getErrorMessage(cause, '이미지를 업로드하지 못했어요.')) }
     finally { setBusy('') }
   }
-  if (!cardSet) return <div className="route-loading">{error || '카드 스튜디오를 여는 중...'}</div>
+  if (!cardSet) return <div className="route-loading"><div className="route-status-card" role={error ? 'alert' : 'status'}><strong>{error || '카드 스튜디오를 여는 중...'}</strong>{error && !loading && <><p>연결을 확인한 뒤 다시 시도해 주세요.</p><button className="primary-button" onClick={() => void refresh()}>카드 세트 다시 불러오기</button></>}</div></div>
   const assetPath = selectedId === 'back' ? backAssetPath : selected?.frontAssetPath ?? null
 
   return <div className="card-designer-page"><header className="card-designer-header"><Link to={cardSet.spaceId ? `/cards?space=${encodeURIComponent(cardSet.spaceId)}` : '/cards'} aria-label="카드 목록으로"><ArrowLeft /></Link><div><p>CARD STUDIO</p><input aria-label="카드 세트 이름" value={name} onChange={event => setName(event.target.value)} disabled={!editable} /></div><span className={`card-status card-status--${cardSet.status}`}>{cardSet.status === 'published' ? `게시됨 v${cardSet.version}` : '초안'}</span><div>{editable && <button onClick={save} disabled={busy === 'save'}><Save /> 저장</button>}{cardSet.canManage && !cardSet.isPlatformDefault && (cardSet.status === 'published' ? <button onClick={() => void run('unpublish', () => unpublishCardSet(cardSet.id), '게시를 취소하고 편집 모드로 전환했어요.')}><Undo2 /> 게시 취소</button> : <button className="is-primary" onClick={() => void run('publish', () => publishCardSet(cardSet.id), '새 버전을 게시했어요.')}><Send /> 게시</button>)}</div></header>
