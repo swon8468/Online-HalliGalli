@@ -29,6 +29,11 @@ test('복구 API 실패는 성공 화면으로 이동하지 않고 한글 오류
 
   await expect(page).toHaveURL('/recover')
   await expect(page.getByRole('alert')).toHaveText('요청이 너무 많아요. 잠시 후 다시 시도해 주세요.')
+  await expect(page.getByLabel('이메일')).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.getByLabel('이메일')).toHaveAttribute('aria-describedby', 'recovery-form-error')
+  await page.getByLabel('이메일').fill('retry-recovery@swonport.kr')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByLabel('이메일')).toHaveAttribute('aria-invalid', 'false')
   await expect(page.getByRole('heading', { name: '계정에 다시 접속해요.' })).toBeVisible()
 })
 
