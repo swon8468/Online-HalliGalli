@@ -1,5 +1,5 @@
 import { Ban, BellRing, Check, Clock3, Gamepad2, LoaderCircle, Search, UserCheck, UserMinus, UserPlus, UsersRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import {
@@ -61,20 +61,30 @@ export default function Friends() {
   const [confirmKey, setConfirmKey] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [overviewError, setOverviewError] = useState('')
   const [inviteContext, setInviteContext] = useState<GameInviteContext>({ available: false })
   const [pushState, setPushState] = useState<PushState>('loading')
   const [pushBusy, setPushBusy] = useState(false)
+  const overviewPromiseRef = useRef<Promise<FriendOverview> | null>(null)
 
-  const loadOverview = useCallback(async () => {
+  const requestOverview = useCallback(() => {
+    if (!overviewPromiseRef.current) {
+      overviewPromiseRef.current = getFriendsOverview().finally(() => { overviewPromiseRef.current = null })
+    }
+    return overviewPromiseRef.current
+  }, [])
+
+  const loadOverview = useCallback(async (ensureFresh = false) => {
+    if (ensureFresh && overviewPromiseRef.current) await overviewPromiseRef.current.catch(() => undefined)
     try {
-      setOverview(await getFriendsOverview())
-      setError('')
+      setOverview(await requestOverview())
+      setOverviewError('')
     } catch (cause) {
-      setError(friendErrorMessage(cause))
+      setOverviewError(friendErrorMessage(cause))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [requestOverview])
 
   useEffect(() => {
     if (!user) return
@@ -102,7 +112,7 @@ export default function Friends() {
       await action()
       setMessage(success)
       setConfirmKey('')
-      await loadOverview()
+      await loadOverview(true)
       await refreshSearch()
     } catch (cause) {
       setError(friendErrorMessage(cause))
@@ -172,6 +182,7 @@ export default function Friends() {
       </div>
 
       {(message || error) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
+      {overviewError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{overviewError}</span><button onClick={() => void loadOverview()}>다시 불러오기</button></div>}
 
       {query.trim().length > 0 && (
         <section className="friends-list search-results" aria-labelledby="search-results-title">
