@@ -347,8 +347,10 @@ export async function returnFinishedGameToRoom(gameId: string): Promise<RoomInfo
 }
 
 export async function findMyActiveSession(): Promise<ActiveSession | null> {
-  const { data, error } = await requireSupabase().rpc('get_my_active_session')
-  if (error?.code === 'PGRST202') return null
+  // A missing client is the intentional local demo mode. Once a client is
+  // configured, every lookup error must still propagate to the entry gate.
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('get_my_active_session')
   if (error) throw error
   if (!data || typeof data !== 'object') return null
   const session = data as Record<string, unknown>
