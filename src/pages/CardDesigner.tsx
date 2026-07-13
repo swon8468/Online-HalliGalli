@@ -25,18 +25,26 @@ export default function CardDesigner() {
   const [message, setMessage] = useState('')
   const [propertiesOpen, setPropertiesOpen] = useState(false)
   const [loading, setLoading] = useState(true)
-  const refreshPromiseRef = useRef<ReturnType<typeof loadCardSet> | null>(null)
+  const activeCardSetRef = useRef(cardSetId)
+  const refreshPromiseRef = useRef<{ key: string; promise: ReturnType<typeof loadCardSet> } | null>(null)
+  activeCardSetRef.current = cardSetId
 
   const refresh = useCallback(async (ensureFresh = false) => {
-    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    const key = cardSetId
+    if (ensureFresh && refreshPromiseRef.current?.key === key) await refreshPromiseRef.current.promise.catch(() => undefined)
     setLoading(true)
-    if (!refreshPromiseRef.current) refreshPromiseRef.current = loadCardSet(cardSetId).finally(() => { refreshPromiseRef.current = null })
+    if (refreshPromiseRef.current?.key !== key) {
+      const promise = loadCardSet(key).finally(() => { if (refreshPromiseRef.current?.promise === promise) refreshPromiseRef.current = null })
+      refreshPromiseRef.current = { key, promise }
+    }
     try {
-      const value = await refreshPromiseRef.current; setCardSet(value); setName(value.name); setDescription(value.description ?? ''); setBackAssetPath(value.backAssetPath); setBackBackground(value.backDesign.background ?? '#0878dd'); setBackAccent(value.backDesign.accent ?? '#ffffff'); setDesigns(value.designs); setError('')
-    } catch { setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
-    finally { setLoading(false) }
+      const value = await refreshPromiseRef.current.promise
+      if (activeCardSetRef.current !== key) return
+      setCardSet(value); setName(value.name); setDescription(value.description ?? ''); setBackAssetPath(value.backAssetPath); setBackBackground(value.backDesign.background ?? '#0878dd'); setBackAccent(value.backDesign.accent ?? '#ffffff'); setDesigns(value.designs); setError('')
+    } catch { if (activeCardSetRef.current === key) setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
+    finally { if (activeCardSetRef.current === key) setLoading(false) }
   }, [cardSetId])
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { setCardSet(null); void refresh() }, [refresh])
   const selected = useMemo(() => designs.find(design => design.id === selectedId) ?? null, [designs, selectedId])
   const editable = Boolean(cardSet?.canManage && cardSet.status !== 'published' && !cardSet.isPlatformDefault)
   const updateSelected = (patch: Partial<CardDesignRecord>) => { if (!selected) return; setDesigns(items => items.map(item => item.id === selected.id ? { ...item, ...patch } : item)) }

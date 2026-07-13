@@ -32,18 +32,26 @@ export default function SpaceAdmin() {
   const [description, setDescription] = useState('')
   const [joinEnabled, setJoinEnabled] = useState(true)
   const [confirmAction, setConfirmAction] = useState<{ type: 'remove-member'; member: SpaceMemberView } | { type: 'archive-space' } | null>(null)
-  const refreshPromiseRef = useRef<ReturnType<typeof loadSpaceAdmin> | null>(null)
+  const activeSlugRef = useRef(slug)
+  const refreshPromiseRef = useRef<{ key: string; promise: ReturnType<typeof loadSpaceAdmin> } | null>(null)
+  activeSlugRef.current = slug
 
   const refresh = useCallback(async (quiet = false, ensureFresh = false) => {
-    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    const key = slug
+    if (ensureFresh && refreshPromiseRef.current?.key === key) await refreshPromiseRef.current.promise.catch(() => undefined)
     if (!quiet) setLoading(true)
-    if (!refreshPromiseRef.current) refreshPromiseRef.current = loadSpaceAdmin(slug).finally(() => { refreshPromiseRef.current = null })
+    if (refreshPromiseRef.current?.key !== key) {
+      const promise = loadSpaceAdmin(key).finally(() => { if (refreshPromiseRef.current?.promise === promise) refreshPromiseRef.current = null })
+      refreshPromiseRef.current = { key, promise }
+    }
     try {
-      const value = await refreshPromiseRef.current; setSnapshot(value); setName(value.space.name); setSpaceSlug(value.space.slug); setDescription(value.space.description ?? ''); setJoinEnabled(value.space.joinEnabled); setError('')
-    } catch { setError('스페이스를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
-    finally { if (!quiet) setLoading(false) }
+      const value = await refreshPromiseRef.current.promise
+      if (activeSlugRef.current !== key) return
+      setSnapshot(value); setName(value.space.name); setSpaceSlug(value.space.slug); setDescription(value.space.description ?? ''); setJoinEnabled(value.space.joinEnabled); setError('')
+    } catch { if (activeSlugRef.current === key) setError('스페이스를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
+    finally { if (!quiet && activeSlugRef.current === key) setLoading(false) }
   }, [slug])
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { setSnapshot(null); void refresh() }, [refresh])
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusy(key); setError(''); setMessage('')
     try { await action(); await refresh(true, true); setMessage(success) }

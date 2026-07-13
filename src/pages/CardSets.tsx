@@ -23,21 +23,27 @@ export default function CardSets() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [spaceId, setSpaceId] = useState(requestedSpace ?? '')
-  const refreshPromiseRef = useRef<Promise<{ cards: CardSetSummary[]; memberships: MySpace[] }> | null>(null)
+  const scopeKey = requestedSpace ?? ''
+  const activeScopeRef = useRef(scopeKey)
+  const refreshPromiseRef = useRef<{ key: string; promise: Promise<{ cards: CardSetSummary[]; memberships: MySpace[] }> } | null>(null)
+  activeScopeRef.current = scopeKey
 
   const refresh = useCallback(async (ensureFresh = false) => {
-    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
+    const key = requestedSpace ?? ''
+    if (ensureFresh && refreshPromiseRef.current?.key === key) await refreshPromiseRef.current.promise.catch(() => undefined)
     setLoading(true)
-    if (!refreshPromiseRef.current) {
-      refreshPromiseRef.current = Promise.all([listCardSets(requestedSpace), fetchMySpaces()])
+    if (refreshPromiseRef.current?.key !== key) {
+      const promise = Promise.all([listCardSets(requestedSpace), fetchMySpaces()])
         .then(([cards, memberships]) => ({ cards, memberships }))
-        .finally(() => { refreshPromiseRef.current = null })
+        .finally(() => { if (refreshPromiseRef.current?.promise === promise) refreshPromiseRef.current = null })
+      refreshPromiseRef.current = { key, promise }
     }
     try {
-      const { cards, memberships } = await refreshPromiseRef.current
+      const { cards, memberships } = await refreshPromiseRef.current.promise
+      if (activeScopeRef.current !== key) return
       setSets(cards); setSpaces(memberships.filter(space => ['owner', 'manager'].includes(space.role) && space.status === 'active')); setError('')
-    } catch { setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
-    finally { setLoading(false) }
+    } catch { if (activeScopeRef.current === key) setError('카드 세트를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
+    finally { if (activeScopeRef.current === key) setLoading(false) }
   }, [requestedSpace])
   useEffect(() => { void refresh() }, [refresh])
   const openCreate = () => { setError(''); setMessage(''); setModal('create'); setSource(null); setName(''); setDescription(''); setSpaceId(requestedSpace ?? spaces[0]?.id ?? '') }
