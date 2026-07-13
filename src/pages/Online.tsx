@@ -26,6 +26,7 @@ export default function Online() {
   const [onlineCount, setOnlineCount] = useState(1)
   const [error, setError] = useState('')
   const statusRequestRef = useRef<Promise<MatchmakingStatus> | null>(null)
+  const operationVersionRef = useRef(0)
 
   const requestStatus = useCallback(() => {
     if (!statusRequestRef.current) {
@@ -46,8 +47,9 @@ export default function Online() {
     if (!user) return
     let active = true
     const refresh = () => {
+      const version = operationVersionRef.current
       return requestStatus()
-        .then(next => { if (active) applyStatus(next) })
+        .then(next => { if (active && operationVersionRef.current === version) applyStatus(next) })
         .catch(caught => { if (active) setError(matchingError(caught)) })
         .finally(() => { if (active) setLoading(false) })
     }
@@ -63,8 +65,9 @@ export default function Online() {
     let pulsePromise: Promise<void> | null = null
     const pulse = () => {
       if (pulsePromise) return pulsePromise
+      const version = operationVersionRef.current
       pulsePromise = heartbeatMatchmaking()
-        .then(next => { if (active) applyStatus(next) })
+        .then(next => { if (active && operationVersionRef.current === version) applyStatus(next) })
         .catch(caught => { if (active) setError(matchingError(caught)) })
         .finally(() => { pulsePromise = null })
       return pulsePromise
@@ -76,20 +79,31 @@ export default function Online() {
   }, [applyStatus, status.status])
 
   const start = async () => {
+    const version = ++operationVersionRef.current
     setBusy(true)
     setError('')
-    try { applyStatus(await joinMatchmaking(count)) }
+    try {
+      const next = await joinMatchmaking(count)
+      if (operationVersionRef.current === version) applyStatus(next)
+    }
     catch (caught) { setError(matchingError(caught)) }
     finally { setBusy(false); setLoading(false) }
   }
 
   const cancel = async () => {
+    const version = ++operationVersionRef.current
     setBusy(true)
     setError('')
-    try { applyStatus(await cancelMatchmaking()) }
+    try {
+      const next = await cancelMatchmaking()
+      if (operationVersionRef.current === version) applyStatus(next)
+    }
     catch (caught) {
       setError(matchingError(caught))
-      try { applyStatus(await getMatchmakingStatus()) } catch { /* keep the original error */ }
+      try {
+        const next = await getMatchmakingStatus()
+        if (operationVersionRef.current === version) applyStatus(next)
+      } catch { /* keep the original error */ }
     } finally { setBusy(false) }
   }
 

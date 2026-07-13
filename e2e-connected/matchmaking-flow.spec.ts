@@ -54,3 +54,26 @@ test('두 브라우저 자동 매칭은 Realtime 준비 공백 없이 같은 게
     await secondContext.close()
   }
 })
+
+test('취소 전에 시작한 늦은 heartbeat가 대기 상태를 되살리지 않는다', async ({ page }) => {
+  const { password } = await connectedEnvironment()
+  await login(page, accounts[1].email, password)
+  await page.goto('/online')
+  await page.getByRole('button', { name: '2 명' }).click()
+  await page.getByRole('button', { name: '매칭 시작' }).click()
+  await expect(page.getByRole('button', { name: '매칭 취소', exact: true }).last()).toBeEnabled()
+
+  let heartbeatStarted = false
+  await page.route('**/rest/v1/rpc/heartbeat_matchmaking', async route => {
+    heartbeatStarted = true
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'waiting', playerCount: 2, queueCount: 1, members: [] }) })
+  })
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect.poll(() => heartbeatStarted).toBe(true)
+  await page.getByRole('button', { name: '매칭 취소', exact: true }).last().click()
+  await expect(page.getByRole('button', { name: '매칭 시작' })).toBeEnabled()
+  await page.waitForTimeout(1_300)
+  await expect(page.getByRole('button', { name: '매칭 시작' })).toBeEnabled()
+  await expect(page.getByText('플레이어를 찾고 있어요.')).toHaveCount(0)
+})
