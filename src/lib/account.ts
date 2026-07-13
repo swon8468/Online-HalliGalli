@@ -22,8 +22,8 @@ export async function getAccountProfile(): Promise<AccountProfile> {
 }
 
 export async function updateAccountProfile(nickname: string, avatarSeed: string) {
-  const { data: auth } = await client().auth.getUser()
-  if (!auth.user) throw new Error('로그인이 필요합니다.')
+  const { data: auth, error: authError } = await client().auth.getUser()
+  if (authError || !auth.user) throw authError ?? new Error('로그인이 필요합니다.')
   const { error } = await client().from('profiles').update({ nickname: nickname.trim(), avatar_seed: avatarSeed, updated_at: new Date().toISOString() }).eq('id', auth.user.id)
   if (error) throw error
   await client().auth.updateUser({ data: { ...auth.user.user_metadata, nickname: nickname.trim() } })

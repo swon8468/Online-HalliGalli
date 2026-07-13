@@ -89,8 +89,8 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export async function fetchMySpaces(): Promise<MySpace[]> {
-  const { data: { user } } = await client().auth.getUser()
-  if (!user) throw new Error('로그인이 필요합니다.')
+  const { data: { user }, error: authError } = await client().auth.getUser()
+  if (authError || !user) throw authError ?? new Error('로그인이 필요합니다.')
   const { data, error } = await client().from('space_members').select('role,spaces(id,name,slug,status,description)').eq('user_id', user.id).order('joined_at', { ascending: false })
   if (error) throw error
   return (data ?? []).flatMap(member => {

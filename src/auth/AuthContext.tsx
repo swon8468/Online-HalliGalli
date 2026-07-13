@@ -84,7 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const client = supabase
 
-    void client.auth.getUser().then(({ data }) => resolveUser(data.user)).then(setUser).catch(() => rejectSession()).finally(() => setLoading(false))
+    void client.auth.getUser().then(({ data, error }) => {
+      if (error) throw error
+      return resolveUser(data.user)
+    }).then(setUser).catch(() => rejectSession()).finally(() => setLoading(false))
     const { data } = client.auth.onAuthStateChange((_event, session) => {
       // signIn/signUp validates the same session itself. Processing the nested
       // event here can attempt signOut while the Auth client still owns its lock.
@@ -148,8 +151,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     refreshUser: async () => {
       if (!supabase) return
-      const { data } = await supabase.auth.getUser()
-      setUser(await resolveUser(data.user))
+      const { data, error } = await supabase.auth.getUser()
+      if (error) {
+        await rejectSession()
+        throw error
+      }
+      try { setUser(await resolveUser(data.user)) }
+      catch (cause) { await rejectSession(); throw cause }
     },
   }), [user, loading, rejectSession])
 
