@@ -145,3 +145,17 @@ svg { display: block; }
 .friends-toolbar{grid-template-columns:auto 1fr auto}.push-enable{min-height:48px;padding:0 14px;border:0;border-radius:12px;display:flex;align-items:center;gap:6px;color:var(--blue);background:#fff;font-size:10px;font-weight:650}.push-enable svg{width:15px}
 .table-actions{display:flex;justify-content:center;gap:3px}.table-actions button:last-child{color:var(--danger)}
 @media(max-width:760px){.friends-toolbar{grid-template-columns:1fr}.push-enable{justify-content:center}}
+
+/* Centered form language */
+form,.form-card{ text-align:center }
+input,textarea,select{ text-align:center }
+input::placeholder,textarea::placeholder{ text-align:center }
+form label,.form-card label{ text-align:center }
+form label>span,.form-card label>span,.join-form label>span,.auth-card label>span{ justify-content:center }
+.admin-login form>span{ margin-inline:auto }
+.admin-login p,.admin-login h1,.admin-login label,.admin-login small{ text-align:center }
+.auth-card .form-error,.join-form .form-error{ text-align:center }
+.stepper-label{ justify-content:center;gap:10px }
+.queue-info{ text-align:center }
+.queue-info>span{ justify-items:center }
+.search-field input,.admin-header input{ text-align:center }
