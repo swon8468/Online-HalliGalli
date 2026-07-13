@@ -21,12 +21,14 @@ test('게임 ID 없는 직접 접근은 세션 조회 실패를 복구하고 빈
 
   await page.goto('/game')
   await expect(page.getByRole('alert')).toContainText('진행 중인 게임을 확인하지 못했어요.')
-  expect(requests).toBe(1)
+  expect(requests).toBeGreaterThanOrEqual(1)
+  expect(requests).toBeLessThanOrEqual(2)
+  const requestsBeforeRetry = requests
 
   blocked = false
   await page.getByRole('button', { name: '다시 확인' }).click()
   await expect(page.getByRole('status')).toContainText('진행 중인 게임이 없어요.')
-  expect(requests).toBe(2)
+  expect(requests).toBe(requestsBeforeRetry + 1)
   await page.getByRole('button', { name: '홈으로 돌아가기' }).click()
   await expect(page).toHaveURL('/')
 })

@@ -73,11 +73,15 @@ export default function Game() {
   const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [rematchBusy, setRematchBusy] = useState(false)
   const [roomBusy, setRoomBusy] = useState(false)
+  const [loadedGameId, setLoadedGameId] = useState<string | null>(null)
+  const [failedGameId, setFailedGameId] = useState<string | null>(null)
   const [sessionLookupState, setSessionLookupState] = useState<'idle' | 'loading' | 'failed' | 'none'>('idle')
   const [sessionLookupAttempt, setSessionLookupAttempt] = useState(0)
   const tableRef = useRef<GameTableCard[]>([])
   const versionRef = useRef<number | null>(null)
   const activeGameIdRef = useRef(gameId)
+  const loadedGameIdRef = useRef<string | null>(null)
+  const initializedRouteGameIdRef = useRef<string | null>(null)
   const gameViewRequestRef = useRef<{ gameId: string; promise: ReturnType<typeof loadGameView> } | null>(null)
   const sessionLookupPromiseRef = useRef<ReturnType<typeof findMyActiveSession> | null>(null)
   const [practice, setPractice] = useState(() => createPracticeGame())
@@ -168,6 +172,9 @@ export default function Game() {
       }
       versionRef.current = view.state.version
       tableRef.current = view.state.table
+      loadedGameIdRef.current = gameId
+      setLoadedGameId(gameId)
+      setFailedGameId(null)
       setPlayers(view.players)
       setState(view.state)
       setTheme(view.theme)
@@ -191,7 +198,11 @@ export default function Game() {
           : `${mine ? '오답이에요.' : `${actor?.nickname ?? '상대방'}님이 잘못 울렸어요.`} 다른 플레이어에게 한 장씩 줍니다.`)
       } else if (view.state.currentTurn === user?.id) setMessage('내 차례예요. 아래 카드 더미를 누르세요.')
       else setMessage('상대방이 카드를 뒤집을 차례예요.')
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
+    } catch (caught) {
+      if (activeGameIdRef.current !== gameId) return
+      setMessage(gameErrorMessage(caught))
+      if (loadedGameIdRef.current !== gameId) setFailedGameId(gameId)
+    }
   }, [animateCards, gameId, isBotMode, navigate, requestGameView, showImpact, user?.id])
 
   const connection = useSessionHeartbeat('game', isBotMode ? null : gameId, () => void refresh())
@@ -209,6 +220,19 @@ export default function Game() {
         else { setMessage('진행 중인 게임이 없습니다.'); setSessionLookupState('none') }
       }).catch(() => { if (active) { setMessage('진행 중인 게임을 확인하지 못했습니다.'); setSessionLookupState('failed') } })
       return () => { active = false }
+    }
+    if (initializedRouteGameIdRef.current !== gameId) {
+      initializedRouteGameIdRef.current = gameId
+      loadedGameIdRef.current = null
+      setLoadedGameId(null)
+      setPlayers([])
+      setState(emptyState)
+      setTheme(null)
+      setFeedback(null)
+      setImpact(null)
+      setMotion(null)
+      versionRef.current = null
+      tableRef.current = []
     }
     setSessionLookupState('idle')
     void refresh()
@@ -340,10 +364,17 @@ export default function Game() {
       return
     }
     if (!gameId) return
+    const actionGameId = gameId
     setBusy(true)
-    try { await animateCards('play-player', 460); setState(await revealGameCard(gameId)); await refresh(true) }
-    catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setBusy(false) }
+    try {
+      await animateCards('play-player', 460)
+      const nextState = await revealGameCard(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
+      setState(nextState)
+      await refresh(true)
+    }
+    catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
   }
 
   const ring = async () => {
@@ -376,53 +407,63 @@ export default function Game() {
       return
     }
     if (!gameId) return
+    const actionGameId = gameId
     setBusy(true)
     try {
-      const result = await ringGameBell(gameId)
+      const result = await ringGameBell(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       if (!result.accepted) setMessage(result.reason === 'already_rung' ? '이번 카드에서는 이미 종이 울렸어요.' : '종을 울릴 수 없어요.')
       else {
         playGameSound(result.correct ? 'correct' : 'wrong', settings)
         vibrateGame(result.correct ? [45, 35, 70] : 140, settings)
       }
       await refresh(true)
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setBusy(false) }
+    } catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
   }
 
   const exitGame = async () => {
     setShowExitConfirm(false)
     if (isBotMode || !gameId || state.phase === 'finished') { navigate('/'); return }
+    const actionGameId = gameId
     setBusy(true)
     try {
-      await abandonGame(gameId)
+      await abandonGame(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       navigate('/', { replace: true })
     } catch (caught) {
       setMessage(gameErrorMessage(caught))
-      setBusy(false)
+      if (activeGameIdRef.current === actionGameId) setBusy(false)
     }
   }
 
   const rematch = async () => {
     if (!gameId || rematchBusy) return
+    const actionGameId = gameId
     setRematchBusy(true)
     try {
-      const result = await requestGameRematch(gameId)
+      const result = await requestGameRematch(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       if (result.ready && result.gameId) navigate(`/game?game=${encodeURIComponent(result.gameId)}`, { replace: true })
       else {
         setState(result.state)
         setMessage('재경기를 요청했어요. 다른 플레이어를 기다리고 있어요.')
       }
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setRematchBusy(false) }
+    } catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setRematchBusy(false) }
   }
 
   const returnToRoom = async () => {
     if (!gameId || roomBusy) return
+    const actionGameId = gameId
     setRoomBusy(true)
     try {
-      const room = await returnFinishedGameToRoom(gameId)
+      const room = await returnFinishedGameToRoom(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       navigate(`/room/${encodeURIComponent(room.id)}`, { replace: true })
-    } catch (caught) { setMessage(gameErrorMessage(caught)); setRoomBusy(false) }
+    } catch (caught) {
+      if (activeGameIdRef.current === actionGameId) { setMessage(gameErrorMessage(caught)); setRoomBusy(false) }
+    }
   }
 
   const restartPractice = () => {
@@ -454,6 +495,15 @@ export default function Game() {
       <p>{sessionLookupState === 'failed' ? '연결을 확인한 뒤 다시 시도해 주세요.' : sessionLookupState === 'none' ? '홈에서 방을 만들거나 연습 게임을 시작해 보세요.' : '잠시만 기다려 주세요.'}</p>
       {sessionLookupState === 'failed' && <button className="primary-button" onClick={() => setSessionLookupAttempt(value => value + 1)}>다시 확인</button>}
       {sessionLookupState === 'none' && <button className="primary-button" onClick={() => navigate('/', { replace: true })}>홈으로 돌아가기</button>}
+    </div></div>
+  }
+
+  if (!isBotMode && gameId && loadedGameId !== gameId) {
+    const loadFailed = failedGameId === gameId
+    return <div className="route-loading" aria-live="polite"><div className="route-status-card" role={loadFailed ? 'alert' : 'status'}>
+      <strong>{loadFailed ? '게임 상태를 불러오지 못했어요.' : '게임 상태를 불러오고 있어요.'}</strong>
+      <p>{loadFailed ? '연결을 확인한 뒤 다시 시도해 주세요.' : '새 게임의 최신 상태를 확인하고 있습니다.'}</p>
+      {loadFailed && <button className="primary-button" onClick={() => { setFailedGameId(null); void refresh(true) }}>다시 불러오기</button>}
     </div></div>
   }
 
