@@ -4,6 +4,9 @@ import {
   createPracticeGame,
   decideBotBell,
   getPracticeTableCards,
+  getPracticeTopCards,
+  practiceBotRingMessage,
+  practiceBotWrongPendingMessage,
   practiceDifficulty,
   practiceIsExactFive,
   revealPracticeCard,
@@ -12,6 +15,7 @@ import {
 
 const deck = buildPracticeDeck()
 assert.equal(deck.length, 56, '연습 덱은 56장이어야 합니다.')
+assert.equal(new Set(deck.map(card => card.id)).size, 56, '모든 실제 카드는 고유 ID를 가져야 합니다.')
 for (const fruit of ['strawberry', 'banana', 'lime', 'plum']) {
   assert.equal(deck.filter(card => card.fruit === fruit).length, 14, `${fruit} 카드 수 오류`)
 }
@@ -19,6 +23,32 @@ assert.deepEqual(
   [1, 2, 3, 4, 5].map(count => deck.filter(card => card.fruit === 'strawberry' && card.count === count).length),
   [5, 3, 3, 2, 1],
   '카드 수량별 장수 오류',
+)
+
+const repeatedVisualState = {
+  ...createPracticeGame(() => 0.1),
+  turn: 'player',
+  playerDraw: [
+    { id: 'same-visual-a', fruit: 'strawberry', count: 1 },
+    { id: 'same-visual-b', fruit: 'strawberry', count: 1 },
+  ],
+  botDraw: [
+    { id: 'bot-between-a', fruit: 'banana', count: 2 },
+    { id: 'bot-between-b', fruit: 'lime', count: 2 },
+  ],
+  playerFace: [],
+  botFace: [],
+}
+const repeatedFirst = revealPracticeCard(repeatedVisualState, 'player')
+const repeatedBetween = revealPracticeCard(repeatedFirst, 'bot')
+const repeatedSecond = revealPracticeCard(repeatedBetween, 'player')
+assert.equal(getPracticeTopCards(repeatedFirst).player.id, 'same-visual-a')
+assert.equal(getPracticeTopCards(repeatedSecond).player.id, 'same-visual-b')
+assert.notEqual(getPracticeTopCards(repeatedFirst).player.id, getPracticeTopCards(repeatedSecond).player.id)
+assert.deepEqual(
+  [getPracticeTopCards(repeatedFirst).player.fruit, getPracticeTopCards(repeatedFirst).player.count],
+  [getPracticeTopCards(repeatedSecond).player.fruit, getPracticeTopCards(repeatedSecond).player.count],
+  '같은 그림의 서로 다른 카드가 연속 등장하는 것은 정상 덱 구성입니다.',
 )
 
 let state = createPracticeGame(() => 0.417)
@@ -64,6 +94,18 @@ assert.equal(penalized.botDraw.length, 3)
 assert.equal(penalized.stats.player.wrongRings, 1)
 assert.equal(penalized.stats.player.cardsPaid, 1)
 assert.equal(penalized.bellLocked, true)
+
+const botWrongLastCardState = {
+  ...wrongState,
+  playerDraw: [card('player-safe', 'lime', 1)],
+  botDraw: [card('bot-last-penalty', 'banana', 2)],
+}
+const botWrongFinished = ringPracticeBell(botWrongLastCardState, 'bot')
+assert.equal(botWrongFinished.winner, 'player')
+assert.equal(botWrongFinished.playerDraw.at(-1).id, 'bot-last-penalty')
+assert.equal(practiceBotWrongPendingMessage, '봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받는 중이에요.')
+assert.equal(practiceBotRingMessage(botWrongFinished, false), '봇이 종을 잘못 눌러 마지막 카드를 잃었어요. 내가 승리했어요!')
+assert.equal(practiceBotRingMessage({ ...botWrongFinished, phase: 'playing', winner: null }, false), '봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받았어요.')
 
 const lastCardState = {
   ...createPracticeGame(() => 0.4),

@@ -60,6 +60,21 @@ test('봇 연습에서 카드 한 장을 순서대로 뒤집을 수 있다', asy
   expect(errors).toEqual([])
 })
 
+test('봇 오답은 즉시 안내되고 벌칙 카드가 플레이어에게 이동한다', async ({ page }) => {
+  const errors = watchRuntimeErrors(page)
+  await page.addInitScript(() => { Math.random = () => 0.5 })
+  await page.goto('/game?mode=bot&difficulty=easy&_testBotRing=wrong')
+  await page.getByRole('button', { name: '28 눌러서 뒤집기' }).click()
+
+  await expect(page.getByText('봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받는 중이에요.')).toBeVisible({ timeout: 6_000 })
+  await expect(page.locator('.card-motion-layer.penalty-opponent')).toBeVisible()
+  await expect(page.getByText('봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받았어요.')).toBeVisible({ timeout: 3_000 })
+  await expect(page.getByRole('region', { name: '상대 플레이어' })).toContainText('27장')
+  await expect(page.locator('.arena-message')).toHaveClass(/is-error/)
+  await expect(page.getByRole('button', { name: '28 눌러서 뒤집기' })).toBeEnabled()
+  expect(errors).toEqual([])
+})
+
 test('만료된 복구 링크와 존재하지 않는 경로가 복구 UI를 제공한다', async ({ page }) => {
   const errors = watchRuntimeErrors(page)
   await page.goto('/recover?type=recovery&error_code=otp_expired')

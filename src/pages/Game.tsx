@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Fruit } from '../components/Fruit'
-import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTopCards, practiceDifficulty, practiceIsExactFive, revealPracticeCard, ringPracticeBell, type PracticeActor, type PracticeCard, type PracticeDifficulty, type PracticeGameState } from '../game/practiceEngine'
+import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTopCards, practiceBotRingMessage, practiceBotWrongPendingMessage, practiceDifficulty, practiceIsExactFive, revealPracticeCard, ringPracticeBell, type PracticeActor, type PracticeCard, type PracticeDifficulty, type PracticeGameState } from '../game/practiceEngine'
 import { loadGameSettings, playGameSound, saveGameSettings, vibrateGame, type GameSettings } from '../game/settings'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
 import { abandonGame, findMyActiveSession, loadGameView, requestGameRematch, returnFinishedGameToRoom, revealGameCard, ringGameBell, subscribeToGame, type GameCardTheme, type GamePlayerInfo, type GameSnapshot, type GameTableCard } from '../lib/rooms'
@@ -28,7 +28,7 @@ function gameErrorMessage(caught: unknown) {
 }
 
 function toTableCard(owner: PracticeActor, card: PracticeCard | null): GameTableCard | null {
-  return card ? { userId: owner, fruit: card.fruit, count: card.count } : null
+  return card ? { cardId: card.id, userId: owner, fruit: card.fruit, count: card.count } : null
 }
 
 function FaceCard({ card, owner, theme, isMine = false, eliminated = false }: { card?: GameTableCard | null; owner: string; theme?: GameCardTheme | null; isMine?: boolean; eliminated?: boolean }) {
@@ -37,7 +37,7 @@ function FaceCard({ card, owner, theme, isMine = false, eliminated = false }: { 
   const [assetFailed, setAssetFailed] = useState(false)
   useEffect(() => { setAssetFailed(false) }, [design?.assetUrl])
   return card
-    ? <div className={className} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111' }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt={`${design.label || card.fruit} ${card.count}개`} onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" />}<small>{owner}의 공개 카드</small></div>
+    ? <div className={className} data-card-id={card.cardId} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111' }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt={`${design.label || card.fruit} ${card.count}개`} onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" />}<small>{owner}의 공개 카드</small></div>
     : <div className={className}><span>{eliminated ? '탈락' : '공개 카드'}</span><small>{owner}</small></div>
 }
 
@@ -57,6 +57,7 @@ export default function Game() {
   const isBotMode = searchParams.get('mode') === 'bot'
   const requestedDifficulty = searchParams.get('difficulty')
   const difficulty: PracticeDifficulty = requestedDifficulty === 'easy' || requestedDifficulty === 'hard' ? requestedDifficulty : 'normal'
+  const testBotRing = import.meta.env.MODE === 'e2e' ? searchParams.get('_testBotRing') : null
   const gameId = searchParams.get('game')
   const [settings, setSettings] = useState<GameSettings>(() => loadGameSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -74,8 +75,10 @@ export default function Game() {
   const tableRef = useRef<GameTableCard[]>([])
   const versionRef = useRef<number | null>(null)
   const [practice, setPractice] = useState(() => createPracticeGame())
+  const [practicePauseVersion, setPracticePauseVersion] = useState<number | null>(null)
   const practiceRef = useRef(practice)
   const botActionVersionRef = useRef<number | null>(null)
+  const forcedBotRingUsedRef = useRef(false)
   const practiceBusyRef = useRef(false)
   const resultFxRef = useRef('')
   const impactTimerRef = useRef<number | null>(null)
@@ -187,11 +190,15 @@ export default function Game() {
   }, [gameId, isBotMode, refresh, state.phase, state.rematchGameId])
 
   useEffect(() => {
-    if (!isBotMode || practice.phase !== 'playing' || busy || botActionVersionRef.current === practice.version) return
+    if (!isBotMode || practice.phase !== 'playing' || busy || practicePauseVersion === practice.version || botActionVersionRef.current === practice.version) return
     botActionVersionRef.current = practice.version
     const config = practiceDifficulty[difficulty]
     const exactFive = practiceIsExactFive(practice)
-    const botDecision = decideBotBell(practice, difficulty)
+    let botDecision = decideBotBell(practice, difficulty)
+    if (testBotRing === 'wrong' && !forcedBotRingUsedRef.current && !exactFive && getPracticeTableCards(practice).length > 0) {
+      forcedBotRingUsedRef.current = true
+      botDecision = 'ring'
+    }
 
     if (botDecision === 'ring') {
       setMessage(exactFive ? '봇도 다섯을 발견했어요. 누가 먼저 누를까요?' : '봇이 종을 누르려는 것 같아요...')
@@ -207,14 +214,15 @@ export default function Game() {
           await animateCards('collect-opponent', 820, cards)
         }
         if (!correct) {
+          setFeedback('error')
+          setMessage(practiceBotWrongPendingMessage)
           playGameSound('wrong', settings)
           await animateCards('penalty-opponent', 900, undefined, 1)
         }
         commitPractice(next)
-        setFeedback(null)
-        setMessage(next.phase === 'finished'
-          ? '봇이 게임에서 승리했어요.'
-          : correct ? '봇이 먼저 정답 종을 눌러 공개 카드를 가져갔어요.' : '봇도 실수했어요. 카드 한 장을 내게 줬어요.')
+        if (next.phase === 'playing') setPracticePauseVersion(next.version)
+        setFeedback(correct ? null : 'error')
+        setMessage(practiceBotRingMessage(next, correct))
         endPracticeAction()
       }, config.reactionMs)
       return () => window.clearTimeout(timer)
@@ -240,7 +248,13 @@ export default function Game() {
       endPracticeAction()
     }, config.revealMs)
     return () => window.clearTimeout(timer)
-  }, [animateCards, beginPracticeAction, busy, commitPractice, difficulty, endPracticeAction, isBotMode, practice, settings])
+  }, [animateCards, beginPracticeAction, busy, commitPractice, difficulty, endPracticeAction, isBotMode, practice, practicePauseVersion, settings, testBotRing])
+
+  useEffect(() => {
+    if (practicePauseVersion === null) return
+    const timer = window.setTimeout(() => setPracticePauseVersion(null), settings.reducedMotion ? 450 : 1400)
+    return () => window.clearTimeout(timer)
+  }, [practicePauseVersion, settings.reducedMotion])
 
   useEffect(() => {
     const finished = isBotMode ? practice.phase === 'finished' : state.phase === 'finished'
@@ -379,7 +393,9 @@ export default function Game() {
   const restartPractice = () => {
     const next = createPracticeGame()
     botActionVersionRef.current = null
+    forcedBotRingUsedRef.current = false
     practiceBusyRef.current = false
+    setPracticePauseVersion(null)
     commitPractice(next)
     setFeedback(null)
     setBusy(false)
@@ -415,7 +431,7 @@ export default function Game() {
           <div className={`turn-pill ${myTurn ? 'is-mine' : ''}`}>{myTurn ? '내 차례' : isBotMode ? '봇 차례' : `${turnPlayer?.nickname ?? '상대'} 차례`}</div>
           <div className={`center-playfield center-playfield--${tableSeats.length}`}>
             <div className={`table-face-grid table-face-grid--${tableSeats.length}`} aria-label="공개 카드 영역">
-              {tableSeats.map(seat => <FaceCard card={seat.card} owner={seat.nickname} theme={isBotMode ? null : theme} isMine={seat.isMine} eliminated={seat.eliminated} key={seat.id} />)}
+              {tableSeats.map(seat => <FaceCard card={seat.card} owner={seat.nickname} theme={isBotMode ? null : theme} isMine={seat.isMine} eliminated={seat.eliminated} key={`${seat.id}-${seat.card?.cardId ?? 'empty'}`} />)}
             </div>
             <button className="arena-bell" onClick={() => void ring()} disabled={busy || me?.eliminated || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || bellLocked || (isBotMode ? getPracticeTableCards(practice).length === 0 : state.table.length === 0)} aria-label="종 울리기"><span /><Bell /><strong>{bellLocked ? '다음 카드까지 대기' : '종 울리기'}</strong></button>
           </div>

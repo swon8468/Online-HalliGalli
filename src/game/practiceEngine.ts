@@ -35,6 +35,19 @@ export const practiceDifficulty = {
   hard: { reactionMs: 520, revealMs: 760, accuracy: 0.97, mistakeRate: 0.012 },
 } as const
 
+export const practiceBotWrongPendingMessage = '봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받는 중이에요.'
+
+export function practiceBotRingMessage(state: PracticeGameState, correct: boolean) {
+  if (state.phase === 'finished') {
+    return state.winner === 'player'
+      ? '봇이 종을 잘못 눌러 마지막 카드를 잃었어요. 내가 승리했어요!'
+      : '봇이 정답을 맞혀 게임에서 승리했어요.'
+  }
+  return correct
+    ? '봇이 먼저 정답 종을 눌러 공개 카드를 가져갔어요.'
+    : '봇이 종을 잘못 눌렀어요! 벌칙 카드 1장을 받았어요.'
+}
+
 const fruitTypes: PracticeFruit[] = ['strawberry', 'banana', 'lime', 'plum']
 const countCopies = [[1, 5], [2, 3], [3, 3], [4, 2], [5, 1]] as const
 

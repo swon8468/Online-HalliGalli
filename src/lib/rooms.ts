@@ -39,6 +39,7 @@ export type ActiveSession =
 export type GameFruit = 'strawberry' | 'banana' | 'lime' | 'plum'
 
 export interface GameTableCard {
+  cardId?: string
   userId: string
   fruit: GameFruit
   count: number
