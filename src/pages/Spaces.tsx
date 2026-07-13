@@ -11,10 +11,12 @@ export default function Spaces() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const requestedJoinCode = params.get('code')?.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8) ?? ''
   const [spaces, setSpaces] = useState<MySpace[]>([])
-  const [joinCode, setJoinCode] = useState(params.get('code')?.toUpperCase().slice(0, 8) ?? '')
+  const [joinCode, setJoinCode] = useState(requestedJoinCode)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -22,16 +24,22 @@ export default function Spaces() {
   const [slug, setSlug] = useState('')
   const [description, setDescription] = useState('')
   const refreshPromiseRef = useRef<ReturnType<typeof fetchMySpaces> | null>(null)
+  const lastRequestedJoinCode = useRef(requestedJoinCode)
 
   const refresh = useCallback(async (ensureFresh = false) => {
     if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
     setLoading(true)
     if (!refreshPromiseRef.current) refreshPromiseRef.current = fetchMySpaces().finally(() => { refreshPromiseRef.current = null })
-    try { setSpaces(await refreshPromiseRef.current); setError('') }
-    catch { setError('스페이스를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
+    try { setSpaces(await refreshPromiseRef.current); setLoadError('') }
+    catch { setLoadError('스페이스를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
     finally { setLoading(false) }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    if (requestedJoinCode === lastRequestedJoinCode.current) return
+    lastRequestedJoinCode.current = requestedJoinCode
+    setJoinCode(requestedJoinCode)
+  }, [requestedJoinCode])
   const join = async (event: FormEvent) => {
     event.preventDefault(); setBusy('join'); setError(''); setMessage('')
     try { const joined = await joinSpace(joinCode); await refresh(true); setMessage(`${joined.name}에 가입했어요.`); setJoinCode('') }
@@ -54,8 +62,8 @@ export default function Spaces() {
   }
 
   return <div className="content-page spaces-page"><PageHeader eyebrow="ORGANIZATION SPACES" title="함께 운영할 공간이에요." description="회사, 행사, 동아리 등 단체별 멤버와 전용 카드·게임을 분리해 관리하세요." />
-    {(error || message) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
-    {error && !loading && <button className="secondary-button resource-retry" onClick={() => void refresh()}>스페이스 다시 불러오기</button>}
+    {(loadError || error || message) && <p className={`friends-notice ${loadError || error ? 'is-error' : ''}`} role={loadError || error ? 'alert' : 'status'}>{loadError || error || message}</p>}
+    {loadError && !loading && <button className="secondary-button resource-retry" onClick={() => void refresh()}>스페이스 다시 불러오기</button>}
     <section className="space-join-panel"><div><Link2 /><span><strong>가입 코드가 있나요?</strong><small>8자리 코드를 입력하면 스페이스 멤버가 됩니다.</small></span></div><form onSubmit={join}><input aria-label="스페이스 가입 코드" value={joinCode} onChange={event => setJoinCode(event.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))} placeholder="A1B2C3D4" minLength={8} maxLength={8} required /><button disabled={busy === 'join'}>{busy === 'join' ? '가입 중...' : '가입하기'}</button></form></section>
     <section className="space-directory"><header><div><h2>내 스페이스</h2><p>{loading ? '불러오는 중...' : `${spaces.length}개 스페이스에 참여 중이에요.`}</p></div>{canCreate && <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus /> 스페이스 생성</button>}</header>
       {loading ? <div className="admin-loading"><span /><span /><span /></div> : spaces.length ? <div className="space-directory-grid">{spaces.map(space => <article key={space.id}><span><Building2 /></span><div><i>{space.status}</i><h3>{space.name}</h3><p>{space.description || '등록된 설명이 없습니다.'}</p><small>{space.slug} · {space.role === 'owner' ? '소유자' : space.role === 'manager' ? '관리자' : '멤버'}</small></div><div><Link className="secondary-button" to={`/create?space=${encodeURIComponent(space.id)}`}>전용 방 만들기 <ArrowRight /></Link>{(['owner', 'manager'].includes(space.role) || canCreate) && <Link className="text-button" to={`/spaces/${encodeURIComponent(space.slug)}/admin`}><ShieldCheck /> 관리</Link>}</div></article>)}</div> : <div className="admin-empty"><UsersRound /><strong>가입한 스페이스가 없어요.</strong><p>가입 코드로 참여하거나 플랫폼 관리자에게 생성을 요청하세요.</p></div>}

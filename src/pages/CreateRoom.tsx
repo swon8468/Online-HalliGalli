@@ -1,5 +1,5 @@
 import { Minus, Plus, UserRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { createPrivateRoom, createSpaceRoom } from '../lib/rooms'
@@ -11,12 +11,13 @@ import { isSupabaseConfigured } from '../lib/supabase'
 export default function CreateRoom() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const requestedSpaceId = params.get('space') ?? ''
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [spaces, setSpaces] = useState<MySpace[]>([])
   const [spacesLoading, setSpacesLoading] = useState(true)
   const [spacesError, setSpacesError] = useState('')
   const [spacesAttempt, setSpacesAttempt] = useState(0)
-  const [spaceId, setSpaceId] = useState(params.get('space') ?? '')
+  const [spaceId, setSpaceId] = useState(requestedSpaceId)
   const [cardSets, setCardSets] = useState<CardSetSummary[]>([])
   const [cardSetsLoading, setCardSetsLoading] = useState(false)
   const [cardSetsError, setCardSetsError] = useState('')
@@ -24,6 +25,13 @@ export default function CreateRoom() {
   const [cardSetId, setCardSetId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const lastRequestedSpaceId = useRef(requestedSpaceId)
+
+  useEffect(() => {
+    if (requestedSpaceId === lastRequestedSpaceId.current) return
+    lastRequestedSpaceId.current = requestedSpaceId
+    setSpaceId(requestedSpaceId && !spacesLoading && !spaces.some(space => space.id === requestedSpaceId) ? '' : requestedSpaceId)
+  }, [requestedSpaceId, spaces, spacesLoading])
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setSpaces([]); setSpacesLoading(false); setSpacesError(''); return }

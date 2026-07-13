@@ -39,3 +39,27 @@ test('방 옵션 조회 실패는 생성을 막고 각 목록을 재시도한다
   await expect(page.getByLabel('카드 세트')).toBeEnabled()
   await expect(page.getByRole('button', { name: '방 만들기', exact: true })).toBeEnabled()
 })
+
+test('같은 방 생성 화면에서 변경된 스페이스 링크를 즉시 반영한다', async ({ page }) => {
+  const firstSpace = '11111111-1111-4111-8111-111111111111'
+  const secondSpace = '22222222-2222-4222-8222-222222222222'
+  await login(page)
+  await page.route('**/rest/v1/space_members?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { role: 'member', spaces: { id: firstSpace, name: '첫 번째 단체', slug: 'first-group', status: 'active', description: null } },
+      { role: 'member', spaces: { id: secondSpace, name: '두 번째 단체', slug: 'second-group', status: 'active', description: null } },
+    ]),
+  }))
+  await page.route('**/rest/v1/card_sets?*', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+
+  await page.goto(`/create?space=${firstSpace}`)
+  const selector = page.getByLabel('게임 공간')
+  await expect(selector).toHaveValue(firstSpace)
+  await page.evaluate(spaceId => {
+    history.pushState({}, '', `/create?space=${spaceId}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, secondSpace)
+  await expect(selector).toHaveValue(secondSpace)
+})
