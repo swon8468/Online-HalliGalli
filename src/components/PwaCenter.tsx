@@ -19,6 +19,7 @@ export default function PwaCenter() {
   const [updateReady, setUpdateReady] = useState(false)
   const [offlineReady, setOfflineReady] = useState(false)
   const [iosHelp, setIosHelp] = useState(false)
+  const [installStatus, setInstallStatus] = useState('')
   const [installDismissed, setInstallDismissed] = useState(() => localStorage.getItem('halli-galli:pwa-install-dismissed') === '1')
   const standalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone))
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
@@ -45,8 +46,15 @@ export default function PwaCenter() {
 
   const install = async () => {
     if (installPrompt) {
-      await installPrompt.prompt(); const choice = await installPrompt.userChoice
-      if (choice.outcome === 'accepted') setInstallPrompt(null)
+      try {
+        await installPrompt.prompt()
+        const choice = await installPrompt.userChoice
+        setInstallPrompt(null)
+        setInstallStatus(choice.outcome === 'accepted' ? '앱 설치를 시작했어요.' : '설치를 취소했어요. 브라우저 메뉴에서 나중에 다시 설치할 수 있어요.')
+      } catch {
+        setInstallPrompt(null)
+        setInstallStatus('설치 안내를 열지 못했어요. 브라우저 메뉴에서 앱 설치를 선택해 주세요.')
+      }
     } else if (ios) setIosHelp(true)
   }
   const dismissInstall = () => { localStorage.setItem('halli-galli:pwa-install-dismissed', '1'); setInstallDismissed(true) }
@@ -55,6 +63,7 @@ export default function PwaCenter() {
     {!online && <aside className="pwa-network-banner is-offline" role="status"><WifiOff /><span><strong>오프라인 상태예요.</strong><small>저장된 화면은 볼 수 있지만 게임 입력은 연결 복구까지 중지됩니다.</small></span></aside>}
     {restored && <aside className="pwa-network-banner is-online" role="status"><Wifi /><span><strong>다시 연결됐어요.</strong><small>최신 게임 상태를 동기화하고 있습니다.</small></span></aside>}
     {offlineReady && <aside className="pwa-toast" role="status"><Download /> 오프라인 실행 준비가 완료됐어요.</aside>}
+    {installStatus && <aside className="pwa-toast" role="status"><Download /> {installStatus}<button aria-label="설치 상태 닫기" onClick={() => setInstallStatus('')}><X /></button></aside>}
     {updateReady && <aside className="pwa-update-banner" role="status"><RefreshCw /><span><strong>새 버전이 준비됐어요.</strong><small>안전하게 새로고침해 업데이트합니다.</small></span><button onClick={() => void window.__halliGalliUpdateSW?.(true)}>지금 업데이트</button></aside>}
     {!standalone && !installDismissed && (installPrompt || ios) && <aside className="pwa-install-banner"><Download /><span><strong>앱으로 설치하기</strong><small>{ios ? 'Safari 공유 메뉴에서 홈 화면에 추가할 수 있어요.' : '홈 화면에서 더 빠르게 실행하세요.'}</small></span><button onClick={() => void install()}>설치 안내</button><button aria-label="설치 안내 닫기" onClick={dismissInstall}><X /></button></aside>}
     {iosHelp && <section className="pwa-ios-overlay" role="dialog" aria-modal="true" aria-labelledby="ios-install-title"><div><button aria-label="iOS 설치 안내 닫기" onClick={() => setIosHelp(false)}><X /></button><Share /><h2 id="ios-install-title">iPhone·iPad에 설치하기</h2><ol><li>Safari 아래의 <strong>공유</strong> 버튼을 누르세요.</li><li><strong>홈 화면에 추가</strong>를 선택하세요.</li><li>오른쪽 위의 <strong>추가</strong>를 누르세요.</li></ol><button className="primary-button full-button" onClick={() => setIosHelp(false)}>확인했어요</button></div></section>}
