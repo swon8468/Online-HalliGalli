@@ -87,10 +87,14 @@ if (queue.error || queue.data.length || invite.error || invite.data.status !== '
   || request.error || request.data.status !== 'cancelled' || friendship.error || friendship.data.length) {
   throw queue.error ?? invite.error ?? request.error ?? friendship.error ?? new Error('탈퇴 연관 데이터 원자적 정리 실패')
 }
+const deletedSessionRequest = await client.rpc('create_private_room', { p_max_players: 2 })
+if (!deletedSessionRequest.error || !deletedSessionRequest.error.message.includes('account_deleted')) {
+  throw new Error('탈퇴 전에 발급된 JWT로 Data API 요청이 허용되었습니다.')
+}
 await client.auth.signOut()
 const denied = await client.auth.signInWithPassword({ email, password: changedPassword })
 if (!denied.error) throw new Error('탈퇴 계정 재로그인이 허용됨')
 
 await admin.from('rooms').delete().eq('id', room.data.id)
 
-console.log('verified profile update, password change, strict deletion confirmation, atomic relationship cleanup, soft deletion, auth ban, and deleted-account login rejection')
+console.log('verified profile update, password change, strict deletion confirmation, atomic relationship cleanup, existing-JWT rejection, soft deletion, auth ban, and deleted-account login rejection')

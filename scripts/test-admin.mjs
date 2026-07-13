@@ -66,9 +66,17 @@ await invoke(support, { action: 'suspend_user', targetId: users.get('player').id
 await invoke(platform, { action: 'suspend_user', targetId: users.get('player').id, reason: '자동 테스트 기간 정지', durationDays: 7 })
 let profile = await admin.from('profiles').select('suspended_until,suspension_reason').eq('id', users.get('player').id).single()
 if (profile.error || !profile.data.suspended_until || profile.data.suspension_reason !== '자동 테스트 기간 정지') throw profile.error ?? new Error('기간 정지 반영 실패')
+const suspendedRequest = await player.rpc('create_private_room', { p_max_players: 2 })
+if (!suspendedRequest.error || !suspendedRequest.error.message.includes('account_suspended')) {
+  throw new Error('정지 전에 발급된 JWT로 Data API 요청이 허용되었습니다.')
+}
 await invoke(platform, { action: 'unsuspend_user', targetId: users.get('player').id, reason: '자동 테스트 복구' })
 profile = await admin.from('profiles').select('suspended_until').eq('id', users.get('player').id).single()
 if (profile.error || profile.data.suspended_until) throw profile.error ?? new Error('정지 해제 실패')
+const restoredRoom = await player.rpc('create_private_room', { p_max_players: 2 })
+if (restoredRoom.error) throw new Error(`정지 해제 후 기존 세션 복구 실패: ${restoredRoom.error.message}`)
+const restoredRoomValue = Array.isArray(restoredRoom.data) ? restoredRoom.data[0] : restoredRoom.data
+await admin.from('rooms').delete().eq('id', restoredRoomValue.id)
 await invoke(platform, { action: 'change_role', targetId: users.get('player').id, reason: '권한 범위 검증', role: 'support' }, false)
 
 const now = new Date().toISOString()
@@ -97,4 +105,4 @@ const audit = await admin.from('moderation_actions').select('action,reason').or(
 if (audit.error || !audit.data.some(row => row.action === 'suspend') || !audit.data.some(row => row.action === 'unsuspend') || !audit.data.some(row => row.action === 'close_room')) throw audit.error ?? new Error('감사 로그 기록 실패')
 
 await admin.from('rooms').delete().eq('id', roomInsert.data.id)
-console.log('verified diagnostic request IDs, player denial, support read-only access, timed suspension/recovery, room closure, super-admin role changes, admin creation, and immutable audit records')
+console.log('verified diagnostic request IDs, player denial, support read-only access, existing-JWT suspension/recovery, room closure, super-admin role changes, admin creation, and immutable audit records')
