@@ -22,7 +22,16 @@ test('두 브라우저 자동 매칭은 Realtime 준비 공백 없이 같은 게
 
   try {
     await Promise.all([login(first, accounts[0].email, password), login(second, accounts[1].email, password)])
+    let initialStatusRequests = 0
+    await first.route('**/rest/v1/rpc/get_matchmaking_status', async route => {
+      initialStatusRequests += 1
+      await new Promise(resolve => setTimeout(resolve, 350))
+      await route.continue()
+    })
     await Promise.all([first.goto('/online'), second.goto('/online')])
+    await expect(first.getByRole('button', { name: '매칭 시작' })).toBeEnabled()
+    await expect.poll(() => initialStatusRequests).toBe(1)
+    await first.unroute('**/rest/v1/rpc/get_matchmaking_status')
     for (const page of [first, second]) {
       await page.getByRole('button', { name: '2 명' }).click()
       await expect(page.getByRole('button', { name: '매칭 시작' })).toBeEnabled()

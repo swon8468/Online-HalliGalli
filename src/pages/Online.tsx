@@ -1,5 +1,5 @@
 import { Check, LoaderCircle, Radio, UserRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
@@ -25,6 +25,14 @@ export default function Online() {
   const [busy, setBusy] = useState(false)
   const [onlineCount, setOnlineCount] = useState(1)
   const [error, setError] = useState('')
+  const statusRequestRef = useRef<Promise<MatchmakingStatus> | null>(null)
+
+  const requestStatus = useCallback(() => {
+    if (!statusRequestRef.current) {
+      statusRequestRef.current = getMatchmakingStatus().finally(() => { statusRequestRef.current = null })
+    }
+    return statusRequestRef.current
+  }, [])
 
   const applyStatus = useCallback((next: MatchmakingStatus) => {
     setStatus(next)
@@ -37,21 +45,17 @@ export default function Online() {
   useEffect(() => {
     if (!user) return
     let active = true
-    const refresh = async () => {
-      try {
-        const next = await getMatchmakingStatus()
-        if (active) applyStatus(next)
-      } catch (caught) {
-        if (active) setError(matchingError(caught))
-      } finally {
-        if (active) setLoading(false)
-      }
+    const refresh = () => {
+      return requestStatus()
+        .then(next => { if (active) applyStatus(next) })
+        .catch(caught => { if (active) setError(matchingError(caught)) })
+        .finally(() => { if (active) setLoading(false) })
     }
     void refresh()
     const unsubscribeQueue = subscribeToMatchmaking(user.id, () => void refresh())
     const unsubscribePresence = subscribeToOnlinePresence(user.id, value => active && setOnlineCount(value))
     return () => { active = false; unsubscribeQueue(); unsubscribePresence() }
-  }, [applyStatus, user])
+  }, [applyStatus, requestStatus, user])
 
   useEffect(() => {
     if (status.status !== 'waiting') return
