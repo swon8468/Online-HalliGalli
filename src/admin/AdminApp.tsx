@@ -1,6 +1,6 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
-import { Route, Routes } from 'react-router-dom'
+import { FormEvent, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ChevronLeft, KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
+import { Link, Route, Routes } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { translateAuthError } from '../lib/authErrors'
@@ -18,15 +18,19 @@ export default function AdminApp() {
   if (!user) return <AdminLogin />
   if (!['support', 'admin', 'super_admin'].includes(user.role)) return <div className="admin-access-denied"><ShieldCheck /><h1>관리자 권한이 필요합니다.</h1><p>플랫폼 관리자에게 권한을 요청하세요.</p></div>
   return <Routes>
-    <Route path="cards" element={<CardSets />} />
-    <Route path="cards/:cardSetId" element={<CardDesigner />} />
-    <Route path="spaces" element={<Spaces />} />
-    <Route path="spaces/:slug/admin" element={<SpaceAdmin />} />
-    <Route path="create" element={<CreateRoom />} />
+    <Route path="cards" element={<AdminToolPage><CardSets /></AdminToolPage>} />
+    <Route path="cards/:cardSetId" element={<AdminToolPage><CardDesigner /></AdminToolPage>} />
+    <Route path="spaces" element={<AdminToolPage><Spaces /></AdminToolPage>} />
+    <Route path="spaces/:slug/admin" element={<AdminToolPage><SpaceAdmin /></AdminToolPage>} />
+    <Route path="create" element={<AdminToolPage><CreateRoom /></AdminToolPage>} />
     <Route path="room/:roomId" element={<RoomLobby />} />
     <Route path="game" element={<Game />} />
     <Route path="*" element={<AdminDashboard />} />
   </Routes>
+}
+
+function AdminToolPage({ children }: { children: ReactNode }) {
+  return <div className="admin-tool-route"><nav className="admin-tool-nav" aria-label="관리자 도구 이동"><Link to="/admin"><ChevronLeft /> 관리자 콘솔로</Link></nav>{children}</div>
 }
 
 function AdminLogin() {
