@@ -1,5 +1,5 @@
 import { BellRing, Check, Clock3, LoaderCircle, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { cancelGameInvite, getGameInvites, inviteErrorMessage, respondGameInvite, subscribeToGameInvites, type GameInvitesOverview } from '../lib/invites'
@@ -19,14 +19,21 @@ export default function InviteCenter() {
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
+  const refreshPromiseRef = useRef<Promise<GameInvitesOverview> | null>(null)
 
-  const refresh = useCallback(async () => {
+  const requestInvites = useCallback(() => {
+    if (!refreshPromiseRef.current) refreshPromiseRef.current = getGameInvites().finally(() => { refreshPromiseRef.current = null })
+    return refreshPromiseRef.current
+  }, [])
+
+  const refresh = useCallback(async (ensureFresh = false) => {
     if (!user) return
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
     setLoading(true)
-    try { setInvites(await getGameInvites()); setError('') }
+    try { setInvites(await requestInvites()); setError('') }
     catch (cause) { setError(inviteErrorMessage(cause)) }
     finally { setLoading(false) }
-  }, [user])
+  }, [requestInvites, user])
 
   useEffect(() => {
     if (!user) { setInvites(EMPTY); return }
@@ -40,11 +47,11 @@ export default function InviteCenter() {
     setBusyId(inviteId); setError('')
     try {
       const result = await respondGameInvite(inviteId, accept)
-      await refresh()
+      await refresh(true)
       if (accept && result.roomId) { setOpen(false); navigate(`/room/${encodeURIComponent(result.roomId)}`) }
     } catch (cause) {
       const actionError = inviteErrorMessage(cause)
-      await refresh()
+      await refresh(true)
       setError(actionError)
     }
     finally { setBusyId('') }
@@ -52,7 +59,7 @@ export default function InviteCenter() {
 
   const cancel = async (inviteId: string) => {
     setBusyId(inviteId); setError('')
-    try { await cancelGameInvite(inviteId); await refresh() }
+    try { await cancelGameInvite(inviteId); await refresh(true) }
     catch (cause) { setError(inviteErrorMessage(cause)) }
     finally { setBusyId('') }
   }
