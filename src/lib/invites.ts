@@ -95,7 +95,11 @@ const MESSAGES: Record<string, string> = {
 }
 
 export function inviteErrorMessage(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error)
+  const raw = error instanceof Error
+    ? error.message
+    : error && typeof error === 'object' && 'message' in error
+      ? String(error.message)
+      : String(error)
   const key = Object.keys(MESSAGES).find(candidate => raw.includes(candidate))
   return key ? MESSAGES[key] : '게임 초대를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.'
 }

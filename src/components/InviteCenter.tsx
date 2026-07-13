@@ -42,7 +42,11 @@ export default function InviteCenter() {
       const result = await respondGameInvite(inviteId, accept)
       await refresh()
       if (accept && result.roomId) { setOpen(false); navigate(`/room/${encodeURIComponent(result.roomId)}`) }
-    } catch (cause) { setError(inviteErrorMessage(cause)); await refresh() }
+    } catch (cause) {
+      const actionError = inviteErrorMessage(cause)
+      await refresh()
+      setError(actionError)
+    }
     finally { setBusyId('') }
   }
 
