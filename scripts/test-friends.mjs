@@ -98,15 +98,24 @@ const directInsert = await clients[0].from('friend_requests').insert({ sender_id
 if (!directInsert.error) throw new Error('friend_requests 직접 insert가 허용됨')
 
 let resolveRealtime
-const realtimeEvent = new Promise(resolve => { resolveRealtime = resolve })
+let rejectRealtime
+const realtimeEvent = new Promise((resolve, reject) => { resolveRealtime = resolve; rejectRealtime = reject })
 let resolveSubscribed
-const realtimeSubscribed = new Promise(resolve => { resolveSubscribed = resolve })
+let rejectSubscribed
+const realtimeSubscribed = new Promise((resolve, reject) => { resolveSubscribed = resolve; rejectSubscribed = reject })
 const realtimeChannel = clients[1].channel(`friend-test:${crypto.randomUUID()}`)
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${userIds[1]}` }, payload => {
     if (payload.new.receiver_id === userIds[1]) resolveRealtime(payload)
   })
-  .subscribe(status => { if (status === 'SUBSCRIBED') resolveSubscribed(status) })
+  .subscribe(status => {
+    if (status === 'SUBSCRIBED') resolveSubscribed(status)
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      const error = new Error(`Realtime 채널 상태: ${status}`)
+      rejectSubscribed(error); rejectRealtime(error)
+    }
+  })
 await withTimeout(realtimeSubscribed, 'Realtime 구독')
+await new Promise(resolve => setTimeout(resolve, 250))
 const sent = await rpc(clients[0], 'send_friend_request', { p_receiver_id: userIds[1] })
 if (sent.status !== 'pending') throw new Error('친구 요청 전송 실패')
 await withTimeout(realtimeEvent, '친구 요청 Realtime 반영')

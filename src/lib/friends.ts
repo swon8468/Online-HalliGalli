@@ -88,7 +88,11 @@ export function subscribeToFriendChanges(userId: string, onChange: () => void) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_blocks' }, onChange)
-    .subscribe()
+    .subscribe(status => {
+      // Reconcile once the server-side subscription is live so a change between
+      // the page's initial fetch and SUBSCRIBED cannot remain invisible.
+      if (status === 'SUBSCRIBED') onChange()
+    })
   return () => { void supabase?.removeChannel(channel) }
 }
 

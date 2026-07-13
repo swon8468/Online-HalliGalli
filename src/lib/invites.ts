@@ -68,7 +68,10 @@ export function subscribeToGameInvites(userId: string, onChange: () => void) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`game-invites:${userId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'game_invites' }, onChange)
-    .subscribe()
+    .subscribe(status => {
+      // Close the initial-fetch/subscription race with an authoritative refresh.
+      if (status === 'SUBSCRIBED') onChange()
+    })
   return () => { void supabase?.removeChannel(channel) }
 }
 

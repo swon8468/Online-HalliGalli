@@ -56,7 +56,9 @@ test('봇 연습에서 카드 한 장을 순서대로 뒤집을 수 있다', asy
   const deck = page.getByRole('button', { name: /28 눌러서 뒤집기/ })
   await expect(deck).toBeEnabled()
   await deck.click()
-  await expect(page.getByText(/이제 봇 차례예요|봇이 카드를 고르고 있어요/)).toBeVisible()
+  await expect(page.getByRole('region', { name: '내 플레이 영역' })).toContainText('27장')
+  await expect(page.locator('.arena-message')).toContainText(/이제 봇 차례예요|봇이 카드를 고르고 있어요|같은 과일의 합이 5예요/)
+  await expect.poll(() => page.locator('[data-card-id]').count()).toBeGreaterThanOrEqual(1)
   expect(errors).toEqual([])
 })
 
