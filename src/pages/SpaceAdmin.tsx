@@ -1,5 +1,5 @@
 import { Archive, Building2, Copy, DoorOpen, FileUp, Link2, Plus, RefreshCw, Save, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react'
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react'
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { copyText } from '../lib/clipboard'
@@ -32,18 +32,21 @@ export default function SpaceAdmin() {
   const [description, setDescription] = useState('')
   const [joinEnabled, setJoinEnabled] = useState(true)
   const [confirmAction, setConfirmAction] = useState<{ type: 'remove-member'; member: SpaceMemberView } | { type: 'archive-space' } | null>(null)
+  const refreshPromiseRef = useRef<ReturnType<typeof loadSpaceAdmin> | null>(null)
 
-  const refresh = useCallback(async (quiet = false) => {
+  const refresh = useCallback(async (quiet = false, ensureFresh = false) => {
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
     if (!quiet) setLoading(true)
+    if (!refreshPromiseRef.current) refreshPromiseRef.current = loadSpaceAdmin(slug).finally(() => { refreshPromiseRef.current = null })
     try {
-      const value = await loadSpaceAdmin(slug); setSnapshot(value); setName(value.space.name); setSpaceSlug(value.space.slug); setDescription(value.space.description ?? ''); setJoinEnabled(value.space.joinEnabled)
-    } catch (cause) { setError(getErrorMessage(cause, '스페이스를 불러오지 못했어요.')) }
+      const value = await refreshPromiseRef.current; setSnapshot(value); setName(value.space.name); setSpaceSlug(value.space.slug); setDescription(value.space.description ?? ''); setJoinEnabled(value.space.joinEnabled); setError('')
+    } catch { setError('스페이스를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.') }
     finally { if (!quiet) setLoading(false) }
   }, [slug])
   useEffect(() => { void refresh() }, [refresh])
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusy(key); setError(''); setMessage('')
-    try { await action(); await refresh(true); setMessage(success) }
+    try { await action(); await refresh(true, true); setMessage(success) }
     catch (cause) { setError(getErrorMessage(cause, '작업을 완료하지 못했어요.')) }
     finally { setBusy('') }
   }
@@ -92,7 +95,7 @@ export default function SpaceAdmin() {
   }
 
   if (loading) return <div className="route-loading">스페이스를 불러오는 중...</div>
-  if (!snapshot) return <div className="content-page narrow-page"><div className="admin-empty"><Building2 /><strong>스페이스를 열 수 없어요.</strong><p>{error}</p><Link to="/spaces">목록으로 돌아가기</Link></div></div>
+  if (!snapshot) return <div className="content-page narrow-page"><div className="admin-empty" role={error ? 'alert' : 'status'}><Building2 /><strong>스페이스를 열 수 없어요.</strong><p>{error || '스페이스 정보를 확인하고 있어요.'}</p>{error && <button className="primary-button" onClick={() => void refresh()}>스페이스 다시 불러오기</button>}<Link to="/spaces">목록으로 돌아가기</Link></div></div>
   return <div className="content-page space-admin-page"><PageHeader eyebrow="SPACE CONTROL" title={`${snapshot.space.name} 관리`} description="멤버, 계정, 방, 전용 카드와 행사 운영 상태를 관리하세요." />
     {(error || message) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
     <nav className="space-tabs" aria-label="스페이스 관리 메뉴">{([['overview', '개요'], ['members', '멤버'], ['rooms', '방·게임'], ['cards', '카드'], ['settings', '설정']] as Array<[SpaceTab, string]>).map(([id, label]) => <button className={tab === id ? 'is-active' : ''} onClick={() => setTab(id)} key={id}>{label}</button>)}</nav>
