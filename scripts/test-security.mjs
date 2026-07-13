@@ -74,6 +74,47 @@ const unauthenticatedPush = await fetch(`${url}/functions/v1/send-push`, {
 })
 if (unauthenticatedPush.status !== 401) throw new Error('인증되지 않은 푸시 API 호출이 차단되지 않았습니다.')
 
+for (const functionName of ['bootstrap-super-admin', 'check-identifier', 'space-admin']) {
+  const rejected = await fetch(`${url}/functions/v1/${functionName}`, {
+    method: 'OPTIONS',
+    headers: { Origin: evilOrigin, apikey: anon, 'Access-Control-Request-Method': 'POST' },
+  })
+  const body = await rejected.json().catch(() => null)
+  if (rejected.status !== 403 || body?.error !== 'origin_not_allowed' || rejected.headers.has('access-control-allow-origin')) {
+    throw new Error(`${functionName}의 허용되지 않은 Origin이 차단되지 않았습니다.`)
+  }
+  const allowed = await fetch(`${url}/functions/v1/${functionName}`, {
+    method: 'OPTIONS',
+    headers: { Origin: localOrigin, apikey: anon, 'Access-Control-Request-Method': 'POST' },
+  })
+  if (!allowed.ok || allowed.headers.get('access-control-allow-origin') !== localOrigin) {
+    throw new Error(`${functionName}의 가변 로컬 개발 포트가 허용되지 않았습니다.`)
+  }
+}
+const identifierFromCurrentPort = await fetch(`${url}/functions/v1/check-identifier`, {
+  method: 'POST',
+  headers: { Origin: localOrigin, apikey: anon, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ type: 'email', value: 'invalid-email' }),
+})
+if (identifierFromCurrentPort.status !== 400 || identifierFromCurrentPort.headers.get('access-control-allow-origin') !== localOrigin) {
+  throw new Error('현재 로컬 포트에서 중복 확인 요청이 Edge Function까지 도달하지 못했습니다.')
+}
+const bootstrapStatusFromCurrentPort = await fetch(`${url}/functions/v1/bootstrap-super-admin`, {
+  method: 'POST',
+  headers: { Origin: localOrigin, apikey: anon, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ action: 'status' }),
+})
+const bootstrapStatusBody = await bootstrapStatusFromCurrentPort.json().catch(() => null)
+if (!bootstrapStatusFromCurrentPort.ok || bootstrapStatusBody?.available !== false) {
+  throw new Error('현재 로컬 포트에서 최초 관리자 상태 조회가 동작하지 않았습니다.')
+}
+const unauthenticatedSpaceAdmin = await fetch(`${url}/functions/v1/space-admin`, {
+  method: 'POST',
+  headers: { Origin: localOrigin, apikey: anon, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ action: 'snapshot', spaceId: randomUUID() }),
+})
+if (unauthenticatedSpaceAdmin.status !== 401) throw new Error('인증되지 않은 스페이스 관리자 API 호출이 차단되지 않았습니다.')
+
 const bootstrap = await player.rpc('complete_platform_bootstrap', { p_user_id: signed.data.user.id })
 if (!bootstrap.error) throw new Error('일반 사용자가 최초 슈퍼 관리자 RPC를 호출했습니다.')
 const directAccountDeletion = await player.rpc('finalize_account_deletion', {
@@ -152,4 +193,4 @@ if (!secondRing.error || !secondRing.error.message.includes('game_action_rate_li
 const removedSecurityRoom = await admin.from('rooms').delete().eq('id', securityRoom.data.id)
 if (removedSecurityRoom.error) throw removedSecurityRoom.error
 
-console.log('verified strict admin/push CORS, push authentication, internal RPC denial, cross-user profile isolation, direct game-event denial, and server game-action rate limiting')
+console.log('verified strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, direct game-event denial, and server game-action rate limiting')

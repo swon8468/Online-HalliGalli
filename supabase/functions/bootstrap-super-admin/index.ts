@@ -7,12 +7,16 @@ const allowedOrigins = new Set((Deno.env.get('ALLOWED_ORIGINS') ?? [
   'http://localhost:43127',
 ].join(',')).split(',').map(value => value.trim()).filter(Boolean))
 
+function isAllowedOrigin(origin: string) {
+  return allowedOrigins.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+}
+
 function response(request: Request, body: unknown, status = 200) {
   const origin = request.headers.get('origin') ?? ''
   return Response.json(body, {
     status,
     headers: {
-      'Access-Control-Allow-Origin': allowedOrigins.has(origin) ? origin : 'null',
+      ...(isAllowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
       'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Vary': 'Origin',
@@ -34,11 +38,10 @@ async function safeEqual(left: string, right: string) {
 }
 
 Deno.serve(async request => {
+  const origin = request.headers.get('origin') ?? ''
+  if (!isAllowedOrigin(origin)) return response(request, { error: 'origin_not_allowed' }, 403)
   if (request.method === 'OPTIONS') return response(request, { ok: true })
   if (request.method !== 'POST') return response(request, { error: 'method_not_allowed' }, 405)
-
-  const origin = request.headers.get('origin') ?? ''
-  if (!allowedOrigins.has(origin)) return response(request, { error: 'origin_not_allowed' }, 403)
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -67,12 +70,12 @@ Deno.serve(async request => {
     user_metadata: { nickname },
     app_metadata: { platform_role: 'super_admin' },
   })
-  if (createError || !created.user) return response(request, { error: createError?.message ?? 'user_creation_failed' }, 400)
+  if (createError || !created.user) return response(request, { error: 'user_creation_failed' }, 400)
 
   const { error: bootstrapError } = await admin.rpc('complete_platform_bootstrap', { p_user_id: created.user.id })
   if (bootstrapError) {
     await admin.auth.admin.deleteUser(created.user.id)
-    return response(request, { error: bootstrapError.message }, 409)
+    return response(request, { error: 'bootstrap_failed' }, 409)
   }
 
   return response(request, { created: true })

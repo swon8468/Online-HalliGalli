@@ -7,10 +7,14 @@ const allowedOrigins = new Set((Deno.env.get('ALLOWED_ORIGINS') ?? [
   'http://localhost:43127',
 ].join(',')).split(',').map(value => value.trim()).filter(Boolean))
 
+function isAllowedOrigin(origin: string) {
+  return allowedOrigins.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+}
+
 function response(request: Request, body: unknown, status = 200) {
   const origin = request.headers.get('origin') ?? ''
   return Response.json(body, { status, headers: {
-    'Access-Control-Allow-Origin': allowedOrigins.has(origin) ? origin : 'null',
+    ...(isAllowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',
@@ -23,10 +27,10 @@ async function sha256(value: string) {
 }
 
 Deno.serve(async request => {
+  const origin = request.headers.get('origin') ?? ''
+  if (!isAllowedOrigin(origin)) return response(request, { error: 'origin_not_allowed' }, 403)
   if (request.method === 'OPTIONS') return response(request, { ok: true })
   if (request.method !== 'POST') return response(request, { error: 'method_not_allowed' }, 405)
-  const origin = request.headers.get('origin') ?? ''
-  if (!allowedOrigins.has(origin)) return response(request, { error: 'origin_not_allowed' }, 403)
 
   const payload = await request.json().catch(() => ({})) as { type?: 'email' | 'phone'; value?: string }
   const normalized = payload.type === 'email' ? payload.value?.trim().toLowerCase() ?? '' : payload.value?.replaceAll(/[^0-9]/g, '') ?? ''
