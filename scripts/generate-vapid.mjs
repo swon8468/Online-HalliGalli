@@ -24,7 +24,8 @@ for (const environment of environments) {
   const client = readEnv(clientPath)
   const server = readEnv(serverPath)
   const adminOrigin = environment === 'development' ? 'https://develop.admin.haligali.swonport.kr' : 'https://admin.haligali.swonport.kr'
-  server.set('ALLOWED_ORIGINS', environment === 'development' ? `${adminOrigin},http://127.0.0.1:43127` : adminOrigin)
+  const publicOrigin = environment === 'development' ? 'https://develop.haligali.swonport.kr' : 'https://haligali.swonport.kr'
+  server.set('ALLOWED_ORIGINS', environment === 'development' ? `${publicOrigin},${adminOrigin},http://127.0.0.1:43127` : `${publicOrigin},${adminOrigin}`)
 
   if (!force && client.has('VITE_VAPID_PUBLIC_KEY') && server.has('VAPID_PRIVATE_KEY') && server.has('BOOTSTRAP_SECRET')) {
     writeEnv(serverPath, server)
