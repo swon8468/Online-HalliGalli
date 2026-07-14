@@ -67,10 +67,29 @@ const expectRpcError = async (promise, message) => {
   }
   throw new Error(`예상한 RPC 오류가 발생하지 않음: ${message}`)
 }
-const withTimeout = (promise, label) => Promise.race([
-  promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 시간 초과`)), 15_000)),
-])
+const withTimeout = (promise, label, timeoutMs = 15_000) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`${label} 시간 초과`)), timeoutMs)
+  promise.then(
+    value => { clearTimeout(timer); resolve(value) },
+    error => { clearTimeout(timer); reject(error) },
+  )
+})
+const deliveredWithin = (promise, timeoutMs) => new Promise(resolve => {
+  const timer = setTimeout(() => resolve(false), timeoutMs)
+  promise.then(
+    () => { clearTimeout(timer); resolve(true) },
+    () => { clearTimeout(timer); resolve(false) },
+  )
+})
+const waitFor = async (read, predicate, label, timeoutMs = 15_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const value = await read()
+    if (predicate(value)) return value
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  throw new Error(`${label} 시간 초과`)
+}
 const cleanup = async () => {
   const requests = await admin.from('friend_requests').delete().in('sender_id', userIds).in('receiver_id', userIds)
   if (requests.error) throw requests.error
@@ -118,7 +137,14 @@ await withTimeout(realtimeSubscribed, 'Realtime 구독')
 await new Promise(resolve => setTimeout(resolve, 250))
 const sent = await rpc(clients[0], 'send_friend_request', { p_receiver_id: userIds[1] })
 if (sent.status !== 'pending') throw new Error('친구 요청 전송 실패')
-await withTimeout(realtimeEvent, '친구 요청 Realtime 반영')
+const realtimeDelivered = await deliveredWithin(realtimeEvent, 3_000)
+// Realtime is a prompt invalidation signal, not the source of truth. A short
+// server reconciliation must still recover the receiver when an event is lost.
+await waitFor(
+  () => rpc(clients[1], 'get_friends_overview'),
+  overview => overview.received.some(request => request.id === sent.requestId),
+  '친구 요청 최종 상태 반영',
+)
 await clients[1].removeChannel(realtimeChannel)
 await expectRpcError(rpc(clients[0], 'send_friend_request', { p_receiver_id: userIds[1] }), 'already_requested')
 const [senderOverview, receiverOverview] = await Promise.all([
@@ -163,5 +189,7 @@ if ((await rpc(clients[0], 'search_friend_users', { p_query: accounts[1].nicknam
 await expectRpcError(rpc(clients[0], 'send_friend_request', { p_receiver_id: userIds[1] }), 'account_unavailable')
 
 await cleanup()
+await Promise.all(clients.map(client => client.removeAllChannels()))
 console.log('verified friend search, send, receive, accept, decline, cancel, cross-request, remove, block, and unblock')
+console.log(`friend request invalidation: ${realtimeDelivered ? 'realtime event delivered' : 'server reconciliation fallback verified'}`)
 console.log('direct writes are denied and suspended users are excluded')

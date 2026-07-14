@@ -56,8 +56,21 @@ export default function InviteCenter() {
     setInvites(EMPTY); setOpen(false); setError('')
     void refresh()
     const unsubscribe = subscribeToGameInvites(userId, () => void refresh())
-    const timer = window.setInterval(() => void refresh(), 30_000)
-    return () => { unsubscribe(); window.clearInterval(timer) }
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const timer = window.setInterval(reconcile, 30_000)
+    window.addEventListener('focus', reconcile)
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => {
+      unsubscribe()
+      window.clearInterval(timer)
+      window.removeEventListener('focus', reconcile)
+      document.removeEventListener('visibilitychange', visibilityChanged)
+    }
   }, [refresh, userId])
 
   const respond = async (inviteId: string, accept: boolean) => {

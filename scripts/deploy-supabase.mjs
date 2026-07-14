@@ -3,6 +3,20 @@ import { spawnSync } from 'node:child_process'
 
 const environment = process.argv[2]
 if (!['development', 'production'].includes(environment)) throw new Error('Usage: node scripts/deploy-supabase.mjs <development|production>')
+const functionsOnly = process.argv[3] === '--functions-only'
+const requestedFunctions = functionsOnly ? process.argv.slice(4) : []
+const edgeFunctions = [
+  ['bootstrap-super-admin', '--no-verify-jwt'],
+  ['send-push'],
+  ['admin-actions'],
+  ['check-identifier', '--no-verify-jwt'],
+  ['delete-account'],
+  ['space-admin'],
+  ['delete-card-set'],
+]
+if (functionsOnly && requestedFunctions.length === 0) throw new Error('At least one Edge Function is required with --functions-only')
+const unknownFunctions = requestedFunctions.filter(name => !edgeFunctions.some(([known]) => known === name))
+if (unknownFunctions.length > 0) throw new Error(`Unknown Edge Function: ${unknownFunctions.join(', ')}`)
 
 function readEnv(path) {
   if (!existsSync(path)) return {}
@@ -27,21 +41,20 @@ function run(args) {
   if (result.status !== 0) throw new Error(`Supabase command failed: ${args[0]}`)
 }
 
-const linkArgs = ['link', '--project-ref', projectRef]
-if (commandEnv.SUPABASE_DB_PASSWORD) linkArgs.push('--password', commandEnv.SUPABASE_DB_PASSWORD)
+if (!functionsOnly) {
+  const linkArgs = ['link', '--project-ref', projectRef]
+  if (commandEnv.SUPABASE_DB_PASSWORD) linkArgs.push('--password', commandEnv.SUPABASE_DB_PASSWORD)
+  console.log(`${environment}: linking project ${projectRef}`)
+  run(linkArgs)
+  console.log(`${environment}: applying database migrations`)
+  run(['db', 'push', '--linked', '--include-all', '--yes'])
+  console.log(`${environment}: setting Edge Function secrets`)
+  run(['secrets', 'set', '--env-file', functionEnvPath, '--project-ref', projectRef])
+}
 
-console.log(`${environment}: linking project ${projectRef}`)
-run(linkArgs)
-console.log(`${environment}: applying database migrations`)
-run(['db', 'push', '--linked', '--include-all', '--yes'])
-console.log(`${environment}: setting Edge Function secrets`)
-run(['secrets', 'set', '--env-file', functionEnvPath, '--project-ref', projectRef])
-console.log(`${environment}: deploying Edge Functions`)
-run(['functions', 'deploy', 'bootstrap-super-admin', '--project-ref', projectRef, '--no-verify-jwt', '--use-api'])
-run(['functions', 'deploy', 'send-push', '--project-ref', projectRef, '--use-api'])
-run(['functions', 'deploy', 'admin-actions', '--project-ref', projectRef, '--use-api'])
-run(['functions', 'deploy', 'check-identifier', '--project-ref', projectRef, '--no-verify-jwt', '--use-api'])
-run(['functions', 'deploy', 'delete-account', '--project-ref', projectRef, '--use-api'])
-run(['functions', 'deploy', 'space-admin', '--project-ref', projectRef, '--use-api'])
-run(['functions', 'deploy', 'delete-card-set', '--project-ref', projectRef, '--use-api'])
-console.log(`${environment}: Supabase deployment complete`)
+const functionsToDeploy = functionsOnly ? edgeFunctions.filter(([name]) => requestedFunctions.includes(name)) : edgeFunctions
+console.log(`${environment}: deploying ${functionsToDeploy.map(([name]) => name).join(', ')}`)
+for (const [name, extraFlag] of functionsToDeploy) {
+  run(['functions', 'deploy', name, '--project-ref', projectRef, ...(extraFlag ? [extraFlag] : []), '--use-api'])
+}
+console.log(`${environment}: ${functionsOnly ? 'selected Edge Function' : 'Supabase'} deployment complete`)

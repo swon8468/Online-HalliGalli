@@ -95,6 +95,18 @@ const allowedOrigin = await fetch(`${url}/functions/v1/admin-actions`, {
 })
 if (!allowedOrigin.ok || allowedOrigin.headers.get('access-control-allow-origin') !== localOrigin) throw new Error('개발 Origin 허용 검증 실패')
 
+for (const productionOrigin of ['https://haligali.swonport.kr', 'https://admin.haligali.swonport.kr']) {
+  for (const functionName of ['admin-actions', 'bootstrap-super-admin', 'check-identifier', 'delete-account', 'delete-card-set', 'send-push', 'space-admin']) {
+    const rejected = await fetch(`${url}/functions/v1/${functionName}`, {
+      method: 'OPTIONS',
+      headers: { Origin: productionOrigin, apikey: anon, 'Access-Control-Request-Method': 'POST' },
+    })
+    if (rejected.status !== 403 || rejected.headers.has('access-control-allow-origin')) {
+      throw new Error(`개발 ${functionName}이 운영 Origin ${productionOrigin}을 허용했습니다.`)
+    }
+  }
+}
+
 const rejectedPushOrigin = await fetch(`${url}/functions/v1/send-push`, {
   method: 'OPTIONS',
   headers: { Origin: evilOrigin, apikey: anon, 'Access-Control-Request-Method': 'POST' },
@@ -279,4 +291,5 @@ if (!secondRing.error || !secondRing.error.message.includes('game_action_rate_li
 const removedSecurityRoom = await admin.from('rooms').delete().eq('id', securityRoom.data.id)
 if (removedSecurityRoom.error) throw removedSecurityRoom.error
 
+await player.removeAllChannels()
 console.log('verified anonymous and internal SECURITY DEFINER denial, strict Edge CORS with variable local ports, push authentication, internal RPC denial, cross-user profile isolation, inactive-session Realtime denial and recovery, direct game-event denial, and server game-action rate limiting')

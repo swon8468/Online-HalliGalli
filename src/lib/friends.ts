@@ -85,16 +85,53 @@ export const unblockFriendUser = (userId: string) => rpc('unblock_friend_user', 
 
 export function subscribeToFriendChanges(userId: string, onChange: () => void) {
   if (!supabase) return () => undefined
-  const channel = supabase.channel(`friends:${userId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, onChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, onChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_blocks' }, onChange)
-    .subscribe(status => {
-      // Reconcile once the server-side subscription is live so a change between
-      // the page's initial fetch and SUBSCRIBED cannot remain invisible.
-      if (status === 'SUBSCRIBED') onChange()
+  let disposed = false
+  let replicationReconciled = false
+  let reconciliationTimer: ReturnType<typeof setInterval> | undefined
+  const reconcile = () => {
+    if (!disposed && (typeof document === 'undefined' || document.visibilityState === 'visible')) onChange()
+  }
+  const reconcileOnFocus = () => reconcile()
+  const reconcileOnVisibility = () => {
+    if (document.visibilityState === 'visible') reconcile()
+  }
+  const channel = supabase.channel(`friends:${userId}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, reconcile)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, reconcile)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_blocks' }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void supabase?.removeChannel(channel) }
+    .subscribe(status => {
+      // A Realtime connection can recover without replaying every missed row.
+      // A server read keeps the visible page correct after reconnecting.
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', reconcileOnFocus)
+    document.addEventListener('visibilitychange', reconcileOnVisibility)
+    reconciliationTimer = setInterval(reconcile, 30_000)
+  }
+  return () => {
+    disposed = true
+    if (reconciliationTimer) clearInterval(reconciliationTimer)
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', reconcileOnFocus)
+      document.removeEventListener('visibilitychange', reconcileOnVisibility)
+    }
+    void supabase?.removeChannel(channel)
+  }
 }
 
 const ERROR_MESSAGES: Record<string, string> = {

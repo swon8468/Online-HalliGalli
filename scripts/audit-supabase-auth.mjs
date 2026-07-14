@@ -26,7 +26,18 @@ if (!response.ok) throw new Error(`Auth 설정 조회 실패 (${response.status}
 const config = await response.json()
 const redirectUrls = String(config.uri_allow_list ?? '').split(',').map(value => value.trim()).filter(Boolean)
 const smtpConfigured = Boolean(config.smtp_host && config.smtp_admin_email)
+const recoveryRedirectUrl = `${publicUrl}/recover?type=recovery`
+const expectedSenderDomain = env.AUTH_SMTP_SENDER_DOMAIN || 'swonport.kr'
+const senderDomainMatches = typeof config.smtp_admin_email === 'string' && config.smtp_admin_email.toLowerCase().endsWith(`@${expectedSenderDomain.toLowerCase()}`)
+const emailRateLimit = Number(config.rate_limit_email_sent)
 const expectedPhone = env.VITE_PHONE_AUTH_ENABLED === 'true'
+
+const redirectPatternMatches = (pattern, target) => {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+  const expression = escaped.replace(/\*\*/g, '.*').replace(/\*/g, '[^./]*')
+  return new RegExp(`^${expression}$`).test(target)
+}
+
 const checks = [
   {
     id: 'site_url',
@@ -35,8 +46,9 @@ const checks = [
   },
   {
     id: 'redirect_allowlist',
-    status: redirectUrls.some(value => value === publicUrl || value.startsWith(`${publicUrl}/`)) ? 'pass' : 'error',
+    status: redirectUrls.some(value => redirectPatternMatches(value, recoveryRedirectUrl)) ? 'pass' : 'error',
     actual: `${redirectUrls.length} entries`,
+    note: '비밀번호 재설정 경로가 허용되는지 검사합니다.',
   },
   {
     id: 'password_min_length',
@@ -54,6 +66,28 @@ const checks = [
     status: smtpConfigured ? 'pass' : environment === 'production' ? 'error' : 'warning',
     actual: smtpConfigured,
     note: smtpConfigured ? undefined : '기본 메일러는 공개 서비스용이 아닙니다.',
+  },
+  {
+    id: 'smtp_sender_domain',
+    status: !smtpConfigured ? 'warning' : senderDomainMatches ? 'pass' : environment === 'production' ? 'error' : 'warning',
+    actual: smtpConfigured ? (senderDomainMatches ? 'expected_domain' : 'different_domain') : 'not_configured',
+    note: smtpConfigured && !senderDomainMatches ? `발신 주소를 @${expectedSenderDomain} 도메인으로 설정해 주세요.` : undefined,
+  },
+  {
+    id: 'email_rate_limit',
+    status: Number.isFinite(emailRateLimit) && emailRateLimit > 0 ? 'pass' : environment === 'production' ? 'error' : 'warning',
+    actual: Number.isFinite(emailRateLimit) ? 'configured' : 'not_reported',
+    note: Number.isFinite(emailRateLimit) && emailRateLimit > 0 ? undefined : 'Auth 이메일 시간당 전송 제한을 확인해 주세요.',
+  },
+  {
+    id: 'branded_email_templates',
+    status: [
+      config.mailer_subjects_confirmation,
+      config.mailer_subjects_recovery,
+      config.mailer_subjects_invite,
+    ].every(subject => typeof subject === 'string' && subject.includes('Halli Galli')) ? 'pass' : 'warning',
+    actual: 'subjects_checked',
+    note: 'auth-templates:preview 명령으로 로컬 템플릿과 원격 설정을 비교할 수 있습니다.',
   },
   {
     id: 'phone_provider_matches_client',

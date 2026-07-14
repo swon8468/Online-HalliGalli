@@ -244,8 +244,20 @@ export default function Game() {
   // so a unanimous rematch always moves every player to the same new game.
   useEffect(() => {
     if (isBotMode || !gameId || state.phase !== 'finished' || state.rematchGameId) return
-    const timer = window.setInterval(() => void refresh(), 1000)
-    return () => window.clearInterval(timer)
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const timer = window.setInterval(reconcile, 5_000)
+    window.addEventListener('focus', reconcile)
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', reconcile)
+      document.removeEventListener('visibilitychange', visibilityChanged)
+    }
   }, [gameId, isBotMode, refresh, state.phase, state.rematchGameId])
 
   useEffect(() => {

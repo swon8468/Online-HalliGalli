@@ -384,29 +384,62 @@ export async function markGameSessionDisconnected(gameId: string) {
 export function subscribeToGame(gameId: string, onChange: () => void) {
   const client = supabase
   if (!client) return () => undefined
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
   // A unique topic avoids an old async cleanup closing a replacement channel
   // during React StrictMode remounts or fast route transitions.
-  const channel = client.channel(`game:${gameId}:${createUuid()}`)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, onChange)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, onChange)
-    .subscribe(status => {
-      // A change can happen after the initial fetch but before Realtime finishes
-      // subscribing. Reconcile once the channel is ready so that state is not lost.
-      if (status === 'SUBSCRIBED') onChange()
+  const channel = client.channel(`game:${gameId}:${createUuid()}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, reconcile)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, reconcile)
+    .on('system', {}, payload => {
+      // Joining the websocket topic does not mean Postgres replication is ready.
+      // Reconcile after the server confirms the WAL stream so updates made in
+      // the short join/replication gap cannot leave the screen stale.
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void client.removeChannel(channel) }
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void client.removeChannel(channel) }
 }
 
 export function subscribeToRoom(roomId: string, onChange: () => void) {
   const client = supabase
   if (!client) return () => undefined
-  const channel = client.channel(`room:${roomId}:${createUuid()}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, onChange)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, onChange)
-    .subscribe(status => {
-      // Reconcile the gap between the first REST fetch and the completed
-      // Realtime subscription. Fast joins must not wait for the heartbeat.
-      if (status === 'SUBSCRIBED') onChange()
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
+  const channel = client.channel(`room:${roomId}:${createUuid()}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, reconcile)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void client.removeChannel(channel) }
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void client.removeChannel(channel) }
 }

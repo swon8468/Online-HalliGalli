@@ -1,6 +1,6 @@
 import { ArrowRight, AtSign, KeyRound, Phone, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { translateAuthError } from '../lib/authErrors'
 import { supabase } from '../lib/supabase'
@@ -9,6 +9,8 @@ import { clearRecoveryRequestReceipt, recoveryRequestIsCoolingDown, saveRecovery
 
 export default function PasswordRecovery() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const recoveryState = location.state as { identifier?: unknown } | null
   const [method, setMethod] = useState<'email' | 'phone'>('email')
   const [step, setStep] = useState<'request' | 'verify' | 'password'>('request')
   const query = new URLSearchParams(window.location.search)
@@ -17,7 +19,7 @@ export default function PasswordRecovery() {
   const hasRecoveryCode = query.get('type') === 'recovery' && Boolean(query.get('code'))
   const recoveryHint = hasRecoveryToken || hasRecoveryCode || query.get('type') === 'recovery' || query.has('error_code')
   const [recoveryLinkState, setRecoveryLinkState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>(recoveryHint ? 'checking' : 'idle')
-  const [identifier, setIdentifier] = useState('')
+  const [identifier, setIdentifier] = useState(() => typeof recoveryState?.identifier === 'string' ? recoveryState.identifier : '')
   const [otp, setOtp] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')

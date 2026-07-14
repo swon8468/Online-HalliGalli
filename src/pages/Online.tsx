@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import { getErrorMessage } from '../lib/errorMessage'
-import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus } from '../lib/matchmaking'
+import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus, type PresenceConnectionState } from '../lib/matchmaking'
 
 const idleStatus: MatchmakingStatus = { status: 'idle', queueCount: 0, members: [] }
 
@@ -24,6 +24,7 @@ export default function Online() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [onlineCount, setOnlineCount] = useState(1)
+  const [presenceState, setPresenceState] = useState<PresenceConnectionState>('connecting')
   const [error, setError] = useState('')
   const statusRequestRef = useRef<Promise<MatchmakingStatus> | null>(null)
   const operationVersionRef = useRef(0)
@@ -55,7 +56,11 @@ export default function Online() {
     }
     void refresh()
     const unsubscribeQueue = subscribeToMatchmaking(user.id, () => void refresh())
-    const unsubscribePresence = subscribeToOnlinePresence(user.id, value => active && setOnlineCount(value))
+    const unsubscribePresence = subscribeToOnlinePresence(
+      user.id,
+      value => active && setOnlineCount(value),
+      next => active && setPresenceState(next),
+    )
     return () => { active = false; unsubscribeQueue(); unsubscribePresence() }
   }, [applyStatus, requestStatus, user])
 
@@ -141,7 +146,7 @@ export default function Online() {
         <div className="count-options">
           {[2, 3, 4, 5, 6].map(value => <button className={count === value ? 'is-selected' : ''} onClick={() => setCount(value)} disabled={loading || busy} key={value}><strong>{value}</strong><span>명</span>{count === value && <Check />}</button>)}
         </div>
-        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>현재 온라인 {onlineCount}명 · 실제 접속 상태</small></span><i>LIVE</i></div>
+        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>{presenceState === 'connected' ? `현재 온라인 ${onlineCount}명 · 실제 접속 상태` : presenceState === 'error' ? '온라인 인원을 확인하지 못했어요.' : '온라인 인원을 확인하고 있어요.'}</small></span><i>{presenceState === 'connected' ? 'LIVE' : presenceState === 'error' ? 'ERROR' : '...'}</i></div>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button full-button" onClick={() => void start()} disabled={loading || busy}>{loading ? '대기열 확인 중...' : busy ? '참가하는 중...' : '매칭 시작'}</button>
       </section>

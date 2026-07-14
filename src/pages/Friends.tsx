@@ -17,7 +17,7 @@ import {
   type FriendProfile,
   type FriendSearchResult,
 } from '../lib/friends'
-import { subscribeToOnlineUsers } from '../lib/matchmaking'
+import { subscribeToOnlineUsers, type PresenceConnectionState } from '../lib/matchmaking'
 import { getGameInviteContext, inviteErrorMessage, sendGameInvite, type GameInviteContext } from '../lib/invites'
 import { disablePushNotifications, enablePushNotifications, getPushNotificationStatus } from '../lib/push'
 import { getErrorMessage } from '../lib/errorMessage'
@@ -53,6 +53,7 @@ export default function Friends() {
   const [tab, setTab] = useState<'friends' | 'requests'>('friends')
   const [overview, setOverview] = useState<FriendOverview>(EMPTY_OVERVIEW)
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set())
+  const [presenceState, setPresenceState] = useState<PresenceConnectionState>('connecting')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<FriendSearchResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -118,7 +119,7 @@ export default function Friends() {
     void loadInviteContext()
     void loadPushState()
     const unsubscribeChanges = subscribeToFriendChanges(user.id, () => void loadOverview())
-    const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers)
+    const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers, setPresenceState)
     return () => {
       unsubscribeChanges()
       unsubscribePresence()
@@ -226,6 +227,7 @@ export default function Friends() {
       {(message || error) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
       {overviewError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{overviewError}</span><button onClick={() => void loadOverview()}>다시 불러오기</button></div>}
       {inviteContextError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{inviteContextError}</span><button onClick={() => void loadInviteContext()}>초대 상태 다시 확인</button></div>}
+      {presenceState === 'error' && <p className="friends-notice is-error" role="status">친구의 온라인 상태를 확인하지 못했어요. 연결되면 자동으로 다시 표시합니다.</p>}
 
       {query.trim().length > 0 && (
         <section className="friends-list search-results" aria-labelledby="search-results-title">

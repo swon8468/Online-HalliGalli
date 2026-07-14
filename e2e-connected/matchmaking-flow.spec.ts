@@ -30,7 +30,15 @@ test('두 브라우저 자동 매칭은 Realtime 준비 공백 없이 같은 게
     })
     await Promise.all([first.goto('/online'), second.goto('/online')])
     await expect(first.getByRole('button', { name: '매칭 시작' })).toBeEnabled()
-    await expect.poll(() => initialStatusRequests).toBe(1)
+    // One initial read is required. Auth hydration/StrictMode and the final
+    // Postgres replication-ready reconciliation may add at most two reads, but
+    // the count must settle instead of entering a refresh loop.
+    await first.waitForTimeout(1_000)
+    expect(initialStatusRequests).toBeGreaterThanOrEqual(1)
+    expect(initialStatusRequests).toBeLessThanOrEqual(3)
+    const settledStatusRequests = initialStatusRequests
+    await first.waitForTimeout(500)
+    expect(initialStatusRequests).toBe(settledStatusRequests)
     await first.unroute('**/rest/v1/rpc/get_matchmaking_status')
     for (const page of [first, second]) {
       await page.getByRole('button', { name: '2 명' }).click()

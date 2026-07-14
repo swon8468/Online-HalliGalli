@@ -98,11 +98,23 @@ export default function RoomLobby() {
     if (!roomId) return
     const unsubscribe = subscribeToRoom(roomId, () => void refresh())
     // Postgres Changes can be delayed or dropped while a mobile browser resumes
-    // its websocket. Reconcile a small waiting-room snapshot as a bounded fallback.
-    const reconcile = window.setInterval(() => {
+    // its websocket. Reconcile on resume and at the same cadence as the session
+    // heartbeat instead of polling the full room snapshot every two seconds.
+    const reconcile = () => {
       if (document.visibilityState === 'visible') void refresh()
-    }, 2_000)
-    return () => { unsubscribe(); window.clearInterval(reconcile) }
+    }
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const timer = window.setInterval(reconcile, 10_000)
+    window.addEventListener('focus', reconcile)
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => {
+      unsubscribe()
+      window.clearInterval(timer)
+      window.removeEventListener('focus', reconcile)
+      document.removeEventListener('visibilitychange', visibilityChanged)
+    }
   }, [refresh, roomId])
 
   const run = async (action: () => Promise<unknown>, success?: string) => {

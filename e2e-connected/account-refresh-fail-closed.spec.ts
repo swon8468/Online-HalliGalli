@@ -14,17 +14,21 @@ test('프로필 저장 후 사용자 재검증 실패는 로컬 인증 토큰을
   await page.route('**/rest/v1/profiles?*', route => route.request().method() === 'PATCH'
     ? route.fulfill({ status: 204, body: '' })
     : route.continue())
-  let userChecks = 0
+  let metadataUpdateStarted = false
+  let rejectedUserChecks = 0
   await page.route('**/auth/v1/user', route => {
-    if (route.request().method() !== 'GET') return route.continue()
-    userChecks += 1
-    return userChecks === 1
-      ? route.continue()
-      : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'user verification failed' }) })
+    const method = route.request().method()
+    if (method === 'PUT') {
+      metadataUpdateStarted = true
+      return route.continue()
+    }
+    if (method !== 'GET' || !metadataUpdateStarted) return route.continue()
+    rejectedUserChecks += 1
+    return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'user verification failed' }) })
   })
 
   await page.getByRole('button', { name: '프로필 저장' }).click()
   await expect(page).toHaveURL(/\/auth\?next=%2Faccount/)
-  expect(userChecks).toBe(2)
+  expect(rejectedUserChecks).toBeGreaterThan(0)
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(key => key.includes('auth-token')))).toBe(false)
 })

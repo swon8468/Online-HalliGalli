@@ -14,12 +14,12 @@ type Payload = {
   nickname?: string
 }
 
-const allowedOrigins = new Set([
+const allowedOrigins = new Set((Deno.env.get('ALLOWED_ORIGINS') ?? [
   'https://develop.admin.haligali.swonport.kr',
   'https://admin.haligali.swonport.kr',
   'https://develop.haligali.swonport.kr',
   'https://haligali.swonport.kr',
-])
+].join(',')).split(',').map(value => value.trim()).filter(Boolean))
 
 function isAllowedOrigin(origin: string) {
   return allowedOrigins.has(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)

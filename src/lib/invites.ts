@@ -67,13 +67,29 @@ export async function cancelGameInvite(inviteId: string) {
 
 export function subscribeToGameInvites(userId: string, onChange: () => void) {
   if (!supabase) return () => undefined
-  const channel = supabase.channel(`game-invites:${userId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_invites' }, onChange)
-    .subscribe(status => {
-      // Close the initial-fetch/subscription race with an authoritative refresh.
-      if (status === 'SUBSCRIBED') onChange()
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
+  const channel = supabase.channel(`game-invites:${userId}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_invites' }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void supabase?.removeChannel(channel) }
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void supabase?.removeChannel(channel) }
 }
 
 const MESSAGES: Record<string, string> = {

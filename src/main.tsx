@@ -1,14 +1,16 @@
-import { StrictMode } from 'react'
+import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { registerSW } from 'virtual:pwa-register'
-import AdminApp from './admin/AdminApp'
 import App from './App'
 import { AuthProvider } from './auth/AuthContext'
 import { isAdminHostname } from './lib/environment'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import E2ECrashProbe from './components/E2ECrashProbe'
+import RouteLoading from './components/RouteLoading'
 import './styles.css'
+
+const AdminApp = lazy(() => import('./admin/AdminApp'))
 
 const updateSW = registerSW({
   immediate: true,
@@ -23,7 +25,7 @@ createRoot(document.getElementById('root')!).render(
       <E2ECrashProbe>
         <BrowserRouter>
           <AuthProvider>
-            {isAdminHostname() ? <AdminApp /> : <App />}
+            {isAdminHostname() ? <Suspense fallback={<RouteLoading />}><AdminApp /></Suspense> : <App />}
           </AuthProvider>
         </BrowserRouter>
       </E2ECrashProbe>

@@ -11,7 +11,7 @@ const accessToken = process.env.SUPABASE_ACCESS_TOKEN || fileEnv.SUPABASE_ACCESS
 if (!accessToken) throw new Error('개발 Supabase 통합 테스트에는 SUPABASE_ACCESS_TOKEN이 필요합니다.')
 const password = process.env.TEST_USER_PASSWORD || `Test-${createHash('sha256').update(accessToken).digest('hex').slice(0, 18)}!`
 const testEnvironment = { ...process.env, TEST_CREATE_USERS: '1', TEST_USER_PASSWORD: password }
-const tests = [
+const availableTests = [
   'test-game:completion',
   'test-game:engine',
   'test-session:recovery',
@@ -30,6 +30,18 @@ const tests = [
   'test-custom-card-game',
   'test-security',
 ]
+const requestedTests = process.argv.slice(2)
+const unknownTests = requestedTests.filter(test => !availableTests.includes(test))
+if (unknownTests.length > 0) throw new Error(`알 수 없는 통합 테스트: ${unknownTests.join(', ')}`)
+const dependencies = new Map([
+  ['test-cards', ['test-spaces']],
+  ['test-custom-card-game', ['test-spaces']],
+])
+const selectedTests = new Set(requestedTests)
+for (const requested of requestedTests) {
+  for (const dependency of dependencies.get(requested) ?? []) selectedTests.add(dependency)
+}
+const tests = requestedTests.length > 0 ? availableTests.filter(test => selectedTests.has(test)) : availableTests
 
 let failedTest = null
 let cleanupFailed = false

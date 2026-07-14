@@ -35,7 +35,12 @@ const [friends, invites, matchmaking] = await Promise.all([
   readFile('src/lib/invites.ts', 'utf8'),
   readFile('src/lib/matchmaking.ts', 'utf8'),
 ])
-if (![friends, invites, matchmaking].every(source => source.includes("status === 'SUBSCRIBED') onChange()"))) {
+const reconcilesAfterSubscribe = source => (
+  source.includes('replication_ready: true')
+  && source.includes(".on('system'")
+  && /payload\.status === 'ok'[^}]{0,160}(?:onChange|reconcile)\(\)/.test(source)
+)
+if (![friends, invites, matchmaking].every(reconcilesAfterSubscribe)) {
   throw new Error('Realtime 초기 조회와 구독 사이의 상태 공백을 복구하지 않습니다.')
 }
 
