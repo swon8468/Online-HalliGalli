@@ -13,24 +13,26 @@ import SpaceAdmin from '../pages/SpaceAdmin'
 import Spaces from '../pages/Spaces'
 import AdminDashboard from './AdminDashboard'
 
-export default function AdminApp() {
+export default function AdminApp({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth()
+  const dedicatedAdminHost = ['admin.haligali.swonport.kr', 'develop.admin.haligali.swonport.kr'].includes(window.location.hostname)
+  const dashboardPath = embedded || !dedicatedAdminHost ? '/admin' : '/'
   if (!user) return <AdminLogin />
   if (!['support', 'admin', 'super_admin'].includes(user.role)) return <div className="admin-access-denied"><ShieldCheck /><h1>관리자 권한이 필요합니다.</h1><p>플랫폼 관리자에게 권한을 요청하세요.</p></div>
   return <Routes>
-    <Route path="cards" element={<AdminToolPage><CardSets /></AdminToolPage>} />
-    <Route path="cards/:cardSetId" element={<AdminToolPage><CardDesigner /></AdminToolPage>} />
-    <Route path="spaces" element={<AdminToolPage><Spaces /></AdminToolPage>} />
-    <Route path="spaces/:slug/admin" element={<AdminToolPage><SpaceAdmin /></AdminToolPage>} />
-    <Route path="create" element={<AdminToolPage><CreateRoom /></AdminToolPage>} />
+    <Route path="cards" element={<AdminToolPage dashboardPath={dashboardPath}><CardSets /></AdminToolPage>} />
+    <Route path="cards/:cardSetId" element={<AdminToolPage dashboardPath={dashboardPath}><CardDesigner /></AdminToolPage>} />
+    <Route path="spaces" element={<AdminToolPage dashboardPath={dashboardPath}><Spaces /></AdminToolPage>} />
+    <Route path="spaces/:slug/admin" element={<AdminToolPage dashboardPath={dashboardPath}><SpaceAdmin /></AdminToolPage>} />
+    <Route path="create" element={<AdminToolPage dashboardPath={dashboardPath}><CreateRoom /></AdminToolPage>} />
     <Route path="room/:roomId" element={<RoomLobby />} />
     <Route path="game" element={<Game />} />
-    <Route path="*" element={<AdminDashboard />} />
+    <Route path="*" element={<AdminDashboard basePath={embedded ? '/admin' : ''} />} />
   </Routes>
 }
 
-function AdminToolPage({ children }: { children: ReactNode }) {
-  return <div className="admin-tool-route"><nav className="admin-tool-nav" aria-label="관리자 도구 이동"><Link to="/admin"><ChevronLeft /> 관리자 콘솔로</Link></nav>{children}</div>
+function AdminToolPage({ children, dashboardPath }: { children: ReactNode; dashboardPath: string }) {
+  return <div className="admin-tool-route"><nav className="admin-tool-nav" aria-label="관리자 도구 이동"><Link to={dashboardPath}><ChevronLeft /> 관리자 콘솔로</Link></nav>{children}</div>
 }
 
 function AdminLogin() {

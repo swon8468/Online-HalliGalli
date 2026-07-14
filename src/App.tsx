@@ -54,7 +54,7 @@ export default function App() {
           <Route path="room/:roomId" element={<ProtectedRoute><RoomLobby /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Route>
-        <Route path="admin" element={<AdminApp />} />
+        <Route path="admin/*" element={<AdminApp embedded />} />
       </Routes>
     </Suspense>
   )

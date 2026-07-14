@@ -32,6 +32,8 @@
     "audit-card-assets": "node scripts/audit-card-assets.mjs preview",
     "audit-auth:develop": "node scripts/audit-supabase-auth.mjs development",
     "audit-auth:production": "node scripts/audit-supabase-auth.mjs production",
+    "auth-config:preview:production": "node scripts/configure-auth-settings.mjs production preview development",
+    "auth-config:apply:production": "node scripts/configure-auth-settings.mjs production apply development",
     "audit-auth-email-recipient": "node scripts/audit-auth-email-recipient.mjs",
     "auth-email:smoke": "node scripts/send-auth-email-smoke.mjs",
     "auth-templates:preview:develop": "node scripts/sync-auth-email-templates.mjs development preview",
@@ -61,6 +63,8 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:connected": "playwright test --config playwright.connected.config.ts",
+    "test:e2e:deploy:develop": "E2E_ENVIRONMENT=development E2E_BASE_URL=https://develop.haligali.swonport.kr playwright test --config playwright.deployed.config.ts",
+    "test:e2e:deploy:production": "E2E_ENVIRONMENT=production E2E_BASE_URL=https://haligali.swonport.kr playwright test --config playwright.deployed.config.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

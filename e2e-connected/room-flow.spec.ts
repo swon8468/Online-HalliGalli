@@ -8,7 +8,10 @@ async function login(page: Page, email: string, password: string) {
   await page.getByLabel('이메일').fill(email)
   await page.getByLabel('비밀번호').fill(password)
   await page.locator('form').getByRole('button', { name: '로그인', exact: true }).last().click()
-  await expect(page).toHaveURL('/')
+  // Auth is an external request and can take longer while the full connected
+  // suite is warming the project. Keep the assertion bounded but allow the
+  // same latency budget used by the rest of the multi-browser flow.
+  await expect(page).toHaveURL('/', { timeout: 15_000 })
 }
 
 test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임 시작을 동기화한다', async ({ browser }) => {

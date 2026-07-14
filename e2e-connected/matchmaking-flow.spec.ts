@@ -33,11 +33,15 @@ test('두 브라우저 자동 매칭은 Realtime 준비 공백 없이 같은 게
     // One initial read is required. Auth hydration/StrictMode and the final
     // Postgres replication-ready reconciliation may add at most two reads, but
     // the count must settle instead of entering a refresh loop.
-    await first.waitForTimeout(1_000)
+    // Supabase replication readiness can arrive after the initial REST read
+    // when the whole connected suite is warming multiple Realtime channels.
+    // Give the bounded final reconciliation time to arrive, then assert that
+    // the request count stays stable instead of relying on a narrow instant.
+    await first.waitForTimeout(2_000)
     expect(initialStatusRequests).toBeGreaterThanOrEqual(1)
     expect(initialStatusRequests).toBeLessThanOrEqual(3)
     const settledStatusRequests = initialStatusRequests
-    await first.waitForTimeout(500)
+    await first.waitForTimeout(1_000)
     expect(initialStatusRequests).toBe(settledStatusRequests)
     await first.unroute('**/rest/v1/rpc/get_matchmaking_status')
     for (const page of [first, second]) {

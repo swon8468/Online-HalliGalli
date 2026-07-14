@@ -45,7 +45,7 @@ const blankDraft: ActionDraft = {
   action: 'suspend_user', targetLabel: '', reason: '', duration: '30', role: 'support', email: '', password: '', nickname: '',
 }
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ basePath = '' }: { basePath?: string }) {
   const { user, signOut } = useAuth()
   const [section, setSection] = useState<AdminSection>('dashboard')
   const [data, setData] = useState<AdminData>(emptyAdminData)
@@ -120,8 +120,8 @@ export default function AdminDashboard() {
           {section === 'users' && <UserManagement users={data.users} query={query} status={userStatus} setStatus={setUserStatus} page={page} setPage={setPage} canMutate={canMutate} isSuperAdmin={isSuperAdmin} onAction={openAction} onDetail={setDetail} />}
           {section === 'rooms' && <RoomManagement rooms={data.rooms} query={query} status={roomStatus} setStatus={setRoomStatus} page={page} setPage={setPage} canMutate={canMutate} onAction={room => openAction('close_room', room.id, room.code)} onDetail={setDetail} />}
           {section === 'audit' && <AuditManagement audit={data.audit} query={query} page={page} setPage={setPage} />}
-          {section === 'cards' && <CardManagement cardSets={data.cardSets} />}
-          {section === 'spaces' && <SpaceManagement spaces={data.spaces} />}
+          {section === 'cards' && <CardManagement cardSets={data.cardSets} basePath={basePath} />}
+          {section === 'spaces' && <SpaceManagement spaces={data.spaces} basePath={basePath} />}
         </>}
       </main>
       {draft && <ActionModal draft={draft} setDraft={setDraft} submitting={submitting} onClose={() => setDraft(null)} onSubmit={submitAction} />}
@@ -158,8 +158,8 @@ function AuditManagement({ audit, query, page, setPage }: { audit: AdminAuditRow
   return <section className="admin-panel"><header><div><h2>관리 조치 이력</h2><p>누가, 누구에게, 어떤 이유로 조치했는지 확인합니다.</p></div></header>{filtered.length ? <div className="admin-table admin-table--audit"><div className="table-head"><span>작업자</span><span>대상</span><span>조치</span><span>사유</span><span>일시</span></div>{pageItems(filtered, page).map(row => <div className="table-row" key={row.id}><span><strong>{row.actorNickname}</strong></span><span>{row.target}</span><span className="status-badge">{row.actionLabel}</span><span title={row.reason}>{row.reason}</span><span>{row.createdAt}</span></div>)}</div> : <EmptyAdminState label="표시할 감사 로그가 없어요." />}<Pagination total={filtered.length} page={page} setPage={setPage} /></section>
 }
 
-function CardManagement({ cardSets }: { cardSets: AdminCardSetRow[] }) { return <section className="admin-panel"><header><div><h2>카드 디자인</h2><p>기본 카드와 스페이스 전용 카드 세트의 초안·게시 버전을 관리합니다.</p></div><Link className="admin-primary" to="/cards"><Brush /> 카드 스튜디오</Link></header>{cardSets.length ? <div className="card-set-grid">{cardSets.map(card => <Link to={`/cards/${encodeURIComponent(card.id)}`} key={card.id}><article><div className="card-preview preview-default">{card.name[0]}</div><strong>{card.name}</strong><small>{card.scope} · v{card.version} · {card.status}</small></article></Link>)}</div> : <EmptyAdminState label="등록된 카드 세트가 없어요." />}</section> }
-function SpaceManagement({ spaces }: { spaces: AdminSpaceRow[] }) { return <section className="admin-panel"><header><div><h2>스페이스</h2><p>회사, 행사, 커뮤니티 등 단체별 멤버와 전용 게임을 관리합니다.</p></div><Link className="admin-primary" to="/spaces"><Boxes /> 스페이스 생성</Link></header>{spaces.length ? <div className="space-list">{spaces.map(space => <Link to={`/spaces/${encodeURIComponent(space.slug)}/admin`} key={space.id}><article><span>{space.name[0]}</span><div><strong>{space.name}</strong><small>{space.slug}</small></div><i>{space.status}</i></article></Link>)}</div> : <EmptyAdminState label="스페이스가 없어요." />}</section> }
+function CardManagement({ cardSets, basePath }: { cardSets: AdminCardSetRow[]; basePath: string }) { return <section className="admin-panel"><header><div><h2>카드 디자인</h2><p>기본 카드와 스페이스 전용 카드 세트의 초안·게시 버전을 관리합니다.</p></div><Link className="admin-primary" to={`${basePath}/cards`}><Brush /> 카드 스튜디오</Link></header>{cardSets.length ? <div className="card-set-grid">{cardSets.map(card => <Link to={`${basePath}/cards/${encodeURIComponent(card.id)}`} key={card.id}><article><div className="card-preview preview-default">{card.name[0]}</div><strong>{card.name}</strong><small>{card.scope} · v{card.version} · {card.status}</small></article></Link>)}</div> : <EmptyAdminState label="등록된 카드 세트가 없어요." />}</section> }
+function SpaceManagement({ spaces, basePath }: { spaces: AdminSpaceRow[]; basePath: string }) { return <section className="admin-panel"><header><div><h2>스페이스</h2><p>회사, 행사, 커뮤니티 등 단체별 멤버와 전용 게임을 관리합니다.</p></div><Link className="admin-primary" to={`${basePath}/spaces`}><Boxes /> 스페이스 생성</Link></header>{spaces.length ? <div className="space-list">{spaces.map(space => <Link to={`${basePath}/spaces/${encodeURIComponent(space.slug)}/admin`} key={space.id}><article><span>{space.name[0]}</span><div><strong>{space.name}</strong><small>{space.slug}</small></div><i>{space.status}</i></article></Link>)}</div> : <EmptyAdminState label="스페이스가 없어요." />}</section> }
 
 function UserTable({ users, canMutate, isSuperAdmin, onAction, onDetail }: { users: AdminUserRow[]; canMutate: boolean; isSuperAdmin: boolean; onAction: (action: AdminAction, targetId: string | undefined, label: string, role?: PlatformRole) => void; onDetail: (user: AdminUserRow) => void }) {
   if (!users.length) return <EmptyAdminState label="조건에 맞는 사용자가 없어요." />
