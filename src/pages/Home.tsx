@@ -1,5 +1,5 @@
 import { ArrowRight, BookOpen, Bot, Building2, DoorOpen, Radio, Sparkles } from 'lucide-react'
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Fruit } from '../components/Fruit'
@@ -17,18 +17,27 @@ const menuItems = [
 export default function Home() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [sessionError, setSessionError] = useState(false)
+  const [sessionAttempt, setSessionAttempt] = useState(0)
+  const sessionRequestRef = useRef<ReturnType<typeof findMyActiveSession> | null>(null)
+  const requestSession = useCallback(() => {
+    if (!sessionRequestRef.current) sessionRequestRef.current = findMyActiveSession().finally(() => { sessionRequestRef.current = null })
+    return sessionRequestRef.current
+  }, [])
   useEffect(() => {
     if (!user) return
     let active = true
-    void findMyActiveSession().then(session => {
+    setSessionError(false)
+    void requestSession().then(session => {
       if (!active || !session) return
       navigate(session.type === 'game' ? `/game?game=${encodeURIComponent(session.gameId)}` : `/room/${encodeURIComponent(session.roomId)}`, { replace: true })
-    }).catch(() => undefined)
+    }).catch(() => { if (active) setSessionError(true) })
     return () => { active = false }
-  }, [navigate, user])
+  }, [navigate, requestSession, sessionAttempt, user])
 
   return (
     <div className="home-page">
+      {sessionError && <div className="home-session-warning" role="alert"><span>진행 중인 게임을 확인하지 못했어요.</span><button onClick={() => setSessionAttempt(value => value + 1)}>다시 확인</button></div>}
       <section className="hero">
         <div className="hero-copy">
           <div className="presence"><span /> 실시간 온라인</div>

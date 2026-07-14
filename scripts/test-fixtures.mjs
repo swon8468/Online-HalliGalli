@@ -7,6 +7,7 @@ if (!['preview', 'cleanup'].includes(mode)) throw new Error('사용법: node scr
 
 const fixtureEmails = new Set([
   'account-delete-test@swonport.kr',
+  'account-delete-peer-test@swonport.kr',
   'admin-created-test@swonport.kr',
   'admin-platform-test@swonport.kr',
   'admin-player-test@swonport.kr',

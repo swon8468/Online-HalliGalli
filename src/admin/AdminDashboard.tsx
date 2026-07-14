@@ -3,10 +3,11 @@ import {
   DoorOpen, Eye, History, LayoutDashboard, LogOut, MoreHorizontal, RotateCcw, Search,
   ShieldCheck, UserCog, UserX, UsersRound, X,
 } from 'lucide-react'
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isDevelopment } from '../lib/environment'
+import { getErrorMessage } from '../lib/errorMessage'
 import {
   emptyAdminData, executeAdminAction, fetchAdminData, type AdminAction, type AdminActionPayload,
   type AdminAuditRow, type AdminCardSetRow, type AdminData, type AdminRoomRow, type AdminSpaceRow,
@@ -44,7 +45,7 @@ const blankDraft: ActionDraft = {
   action: 'suspend_user', targetLabel: '', reason: '', duration: '30', role: 'support', email: '', password: '', nickname: '',
 }
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ basePath = '' }: { basePath?: string }) {
   const { user, signOut } = useAuth()
   const [section, setSection] = useState<AdminSection>('dashboard')
   const [data, setData] = useState<AdminData>(emptyAdminData)
@@ -58,16 +59,19 @@ export default function AdminDashboard() {
   const [draft, setDraft] = useState<ActionDraft | null>(null)
   const [detail, setDetail] = useState<AdminUserRow | AdminRoomRow | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const refreshPromiseRef = useRef<ReturnType<typeof fetchAdminData> | null>(null)
 
-  const refresh = async (silent = false) => {
+  const refresh = useCallback(async (silent = false, ensureFresh = false) => {
+    if (ensureFresh && refreshPromiseRef.current) await refreshPromiseRef.current.catch(() => undefined)
     if (!silent) setLoading(true)
     setError('')
-    try { setData(await fetchAdminData()) }
-    catch (caught) { setError(caught instanceof Error ? caught.message : '관리자 데이터를 불러오지 못했습니다.') }
+    if (!refreshPromiseRef.current) refreshPromiseRef.current = fetchAdminData().finally(() => { refreshPromiseRef.current = null })
+    try { setData(await refreshPromiseRef.current) }
+    catch { setError('관리자 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.') }
     finally { if (!silent) setLoading(false) }
-  }
+  }, [])
 
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { void refresh() }, [refresh])
   useEffect(() => { setPage(1) }, [query, userStatus, roomStatus, section])
 
   const openAction = (action: AdminAction, targetId: string | undefined, targetLabel: string, role: PlatformRole = 'support') => {
@@ -86,12 +90,12 @@ export default function AdminDashboard() {
     if (draft.action === 'create_admin') Object.assign(payload, { role: draft.role, email: draft.email, password: draft.password, nickname: draft.nickname })
     try {
       await executeAdminAction(payload)
-      await refresh(true)
+      await refresh(true, true)
       setDraft(null)
       setDetail(null)
       setNotice('관리 조치가 완료되고 감사 로그에 기록되었습니다.')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '관리 작업을 완료하지 못했습니다.')
+      setError(getErrorMessage(caught, '관리 작업을 완료하지 못했습니다.'))
     } finally { setSubmitting(false) }
   }
 
@@ -109,15 +113,15 @@ export default function AdminDashboard() {
       <main className="admin-main">
         <header className="admin-header"><div><p>PLATFORM CONTROL</p><h1>{sections.find(item => item.id === section)?.label}</h1></div><label><Search /><input aria-label="관리자 통합 검색" placeholder="사용자, 방, 감사 로그 검색" value={query} onChange={event => setQuery(event.target.value)} /></label></header>
         {actorRole === 'support' && <div className="admin-readonly"><Eye /> 지원 담당자는 모든 운영 정보를 조회할 수 있지만 변경할 수는 없습니다.</div>}
-        {error && <div className="admin-error" role="alert">{error}</div>}
+        {error && <div className="admin-error" role="alert"><span>{error}</span><button onClick={() => void refresh()}>관리자 데이터 다시 불러오기</button></div>}
         {notice && <div className="admin-success" role="status"><CheckCircle2 />{notice}</div>}
         {loading ? <AdminLoading /> : <>
           {section === 'dashboard' && <DashboardOverview data={data} query={query} canMutate={canMutate} onRoomAction={room => openAction('close_room', room.id, room.code)} onDetail={setDetail} />}
           {section === 'users' && <UserManagement users={data.users} query={query} status={userStatus} setStatus={setUserStatus} page={page} setPage={setPage} canMutate={canMutate} isSuperAdmin={isSuperAdmin} onAction={openAction} onDetail={setDetail} />}
           {section === 'rooms' && <RoomManagement rooms={data.rooms} query={query} status={roomStatus} setStatus={setRoomStatus} page={page} setPage={setPage} canMutate={canMutate} onAction={room => openAction('close_room', room.id, room.code)} onDetail={setDetail} />}
           {section === 'audit' && <AuditManagement audit={data.audit} query={query} page={page} setPage={setPage} />}
-          {section === 'cards' && <CardManagement cardSets={data.cardSets} />}
-          {section === 'spaces' && <SpaceManagement spaces={data.spaces} />}
+          {section === 'cards' && <CardManagement cardSets={data.cardSets} basePath={basePath} />}
+          {section === 'spaces' && <SpaceManagement spaces={data.spaces} basePath={basePath} />}
         </>}
       </main>
       {draft && <ActionModal draft={draft} setDraft={setDraft} submitting={submitting} onClose={() => setDraft(null)} onSubmit={submitAction} />}
@@ -154,8 +158,8 @@ function AuditManagement({ audit, query, page, setPage }: { audit: AdminAuditRow
   return <section className="admin-panel"><header><div><h2>관리 조치 이력</h2><p>누가, 누구에게, 어떤 이유로 조치했는지 확인합니다.</p></div></header>{filtered.length ? <div className="admin-table admin-table--audit"><div className="table-head"><span>작업자</span><span>대상</span><span>조치</span><span>사유</span><span>일시</span></div>{pageItems(filtered, page).map(row => <div className="table-row" key={row.id}><span><strong>{row.actorNickname}</strong></span><span>{row.target}</span><span className="status-badge">{row.actionLabel}</span><span title={row.reason}>{row.reason}</span><span>{row.createdAt}</span></div>)}</div> : <EmptyAdminState label="표시할 감사 로그가 없어요." />}<Pagination total={filtered.length} page={page} setPage={setPage} /></section>
 }
 
-function CardManagement({ cardSets }: { cardSets: AdminCardSetRow[] }) { return <section className="admin-panel"><header><div><h2>카드 디자인</h2><p>기본 카드와 스페이스 전용 카드 세트의 초안·게시 버전을 관리합니다.</p></div><Link className="admin-primary" to="/cards"><Brush /> 카드 스튜디오</Link></header>{cardSets.length ? <div className="card-set-grid">{cardSets.map(card => <Link to={`/cards/${encodeURIComponent(card.id)}`} key={card.id}><article><div className="card-preview preview-default">{card.name[0]}</div><strong>{card.name}</strong><small>{card.scope} · v{card.version} · {card.status}</small></article></Link>)}</div> : <EmptyAdminState label="등록된 카드 세트가 없어요." />}</section> }
-function SpaceManagement({ spaces }: { spaces: AdminSpaceRow[] }) { return <section className="admin-panel"><header><div><h2>스페이스</h2><p>회사, 행사, 커뮤니티 등 단체별 멤버와 전용 게임을 관리합니다.</p></div><Link className="admin-primary" to="/spaces"><Boxes /> 스페이스 생성</Link></header>{spaces.length ? <div className="space-list">{spaces.map(space => <Link to={`/spaces/${encodeURIComponent(space.slug)}/admin`} key={space.id}><article><span>{space.name[0]}</span><div><strong>{space.name}</strong><small>{space.slug}</small></div><i>{space.status}</i></article></Link>)}</div> : <EmptyAdminState label="스페이스가 없어요." />}</section> }
+function CardManagement({ cardSets, basePath }: { cardSets: AdminCardSetRow[]; basePath: string }) { return <section className="admin-panel"><header><div><h2>카드 디자인</h2><p>기본 카드와 스페이스 전용 카드 세트의 초안·게시 버전을 관리합니다.</p></div><Link className="admin-primary" to={`${basePath}/cards`}><Brush /> 카드 스튜디오</Link></header>{cardSets.length ? <div className="card-set-grid">{cardSets.map(card => <Link to={`${basePath}/cards/${encodeURIComponent(card.id)}`} key={card.id}><article><div className="card-preview preview-default">{card.name[0]}</div><strong>{card.name}</strong><small>{card.scope} · v{card.version} · {card.status}</small></article></Link>)}</div> : <EmptyAdminState label="등록된 카드 세트가 없어요." />}</section> }
+function SpaceManagement({ spaces, basePath }: { spaces: AdminSpaceRow[]; basePath: string }) { return <section className="admin-panel"><header><div><h2>스페이스</h2><p>회사, 행사, 커뮤니티 등 단체별 멤버와 전용 게임을 관리합니다.</p></div><Link className="admin-primary" to={`${basePath}/spaces`}><Boxes /> 스페이스 생성</Link></header>{spaces.length ? <div className="space-list">{spaces.map(space => <Link to={`${basePath}/spaces/${encodeURIComponent(space.slug)}/admin`} key={space.id}><article><span>{space.name[0]}</span><div><strong>{space.name}</strong><small>{space.slug}</small></div><i>{space.status}</i></article></Link>)}</div> : <EmptyAdminState label="스페이스가 없어요." />}</section> }
 
 function UserTable({ users, canMutate, isSuperAdmin, onAction, onDetail }: { users: AdminUserRow[]; canMutate: boolean; isSuperAdmin: boolean; onAction: (action: AdminAction, targetId: string | undefined, label: string, role?: PlatformRole) => void; onDetail: (user: AdminUserRow) => void }) {
   if (!users.length) return <EmptyAdminState label="조건에 맞는 사용자가 없어요." />

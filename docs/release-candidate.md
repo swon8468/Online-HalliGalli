@@ -8,8 +8,9 @@
 |---|---|---|
 | Auth Site URL | `https://develop.haligali.swonport.kr` | 운영 프로젝트는 `https://haligali.swonport.kr`로 별도 설정 |
 | 개발 Redirect URL | 개발 도메인과 로컬 43127/43129 허용 | 운영은 `https://haligali.swonport.kr/recover**`처럼 필요한 경로만 허용 |
-| 이메일 로그인 | 활성 | 운영 SMTP와 발신 도메인 검증 필요 |
-| 커스텀 SMTP | 개발 프로젝트 미설정 | 공개 전 개발·운영 각각 설정하고 실제 수신 확인 |
+| 이메일 로그인 | 활성, 개발 복구 메일 실제 수신 및 재설정 확인 | 운영에서도 가입 확인·복구 메일 각각 수신 확인 |
+| 커스텀 SMTP | 개발 Resend SMTP 및 `swonport.kr` 발신 도메인 검증 완료 | 운영 Supabase에 별도 SMTP 설정 후 실제 수신 확인 |
+| 비밀번호 정책 | 개발 서버 최소 8자, UI 최소 8자 | 운영도 최소 8자 이상으로 맞추고 Pro 이상이면 HIBP 유출 비밀번호 차단 활성화 |
 | 전화번호 인증 | 개발 프로젝트 비활성 | SMS 공급자를 설정한 환경에서만 `VITE_PHONE_AUTH_ENABLED=true` 사용 |
 | 푸시 등록 | 인증 전용 RPC와 여러 기기 endpoint 저장 | HTTPS 개발 도메인과 실기기에서 수신 확인 |
 | PWA 아이콘 | 192/512 PNG, maskable, iOS 180 PNG | 기기 홈 화면에서 잘림 여부 확인 |
@@ -36,15 +37,24 @@ npm run test:integration
 npm run test:e2e:connected
 npm run test-release-load
 npm run test-fixtures:preview
+npx supabase db lint --linked --level warning
+npm run audit-auth:develop
+npm run auth-templates:preview:develop
 ```
 
 자동화 범위:
 
 - 데스크톱/Pixel 5 화면의 핵심 메뉴, 인증 보호 경로, 가입 검증, 봇 카드 뒤집기, 만료 복구 링크, 404
 - 실제 개발 Supabase에서 두 계정 로그인, 방 생성, 코드 참여, 준비, 시작, 동일 게임 진입
-- 6인 병렬 참여/준비, 동일 액션 12회 멱등 처리, 경쟁 턴 6건 단일 승인 및 응답 시간 측정
+- 6인 병렬 참여/준비, 동일 액션 12회 멱등 처리, 경쟁 턴 6건 단일 승인, Realtime 6채널 준비·재구독, 24개 추가 액션 및 응답 시간 측정
 - PWA 매니페스트, 설치 아이콘 크기, 캐시 워커, 업데이트/오프라인 훅, 푸시 payload 복구, 동일 출처 딥링크
 - 푸시 endpoint의 인증 등록, 공유 기기 계정 변경, RLS 소유권, 테스트 데이터 삭제
+
+2026-07-14 릴리스 후보 기준으로 단위 테스트, 로컬 E2E 18개, 개발 Supabase 연결 E2E 47개, 통합 스위트 17개와 DB lint가 통과했다. 통합 테스트 종료 후 fixture 계정·방·스페이스·카드 세트 잔존 수는 모두 0이었다. 이후 Realtime 안정성 보강 검증에서는 6개 사용자 채널과 service-role 진단 채널이 PostgreSQL replication 준비 뒤 최종 version 26까지 동기화됐고, 한 사용자 채널의 제거·재구독도 성공했다. 24개 추가 게임 액션을 포함한 60개 요청은 p95 308ms, 최대 333ms였다.
+
+Postgres Changes 채널은 websocket의 `SUBSCRIBED`만으로 replication 준비가 완료된 것이 아니다. 방·게임·친구·초대·자동 매칭 구독은 `replication_ready` system 신호를 받은 뒤 권위 상태를 다시 조회하며, StrictMode에서 정리된 채널의 늦은 콜백과 한 세대의 중복 system 신호를 무시한다.
+
+라우트 단위 코드 분할 후 초기 앱 청크는 58.21KB gzip에서 19.40KB gzip으로 감소했다. 게임과 관리자 코드는 각각 별도 청크로 필요할 때 로드된다. 공개 빌드마다 이 수치가 크게 증가하지 않는지 빌드 출력을 비교한다.
 
 ## 실제 기기 필요
 
@@ -65,6 +75,8 @@ npm run test-fixtures:preview
 ## 인증 이메일과 SMS
 
 SMTP 설정값은 코드나 `.env.*`가 아니라 각 Supabase 프로젝트의 Authentication SMTP 설정에 입력한다.
+
+비밀값을 출력하지 않는 설정 감사는 `npm run audit-auth:develop` 또는 `npm run audit-auth:production`으로 실행한다. Site URL, redirect allowlist, 서버 최소 비밀번호, HIBP, SMTP, 전화 Provider와 클라이언트 플래그 일치 여부를 확인한다.
 
 - SMTP host, port, user, password
 - From 주소와 sender name
@@ -117,7 +129,8 @@ SMTP 설정값은 코드나 `.env.*`가 아니라 각 Supabase 프로젝트의 A
 - [ ] 운영 DB 백업/복구 지점 확인
 - [ ] 운영 Supabase에 마이그레이션을 파일 순서대로 적용
 - [ ] 운영 Edge Function 비밀값과 허용 Origin 확인 후 함수 배포
-- [ ] 운영 Auth Site URL, Redirect URL, SMTP, rate limit 확인
+- [ ] 운영 Auth Site URL, Redirect URL, SMTP, rate limit, 최소 비밀번호 8자 이상 확인
+- [ ] Pro 이상 플랜이면 Auth의 HIBP 유출 비밀번호 차단 활성화
 - [ ] Cloudflare 사용자/관리자 프로젝트에 각 운영 공개 변수 설정
 - [ ] `main` 빌드와 스모크 테스트 통과
 - [ ] 실제 기기 PWA/푸시 표 완료

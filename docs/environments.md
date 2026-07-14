@@ -16,6 +16,14 @@
 - `npm run keys:vapid`는 개발/운영 VAPID 키와 일회성 관리자 부트스트랩 비밀값을 생성한다.
 - 공개키는 `.env.development`/`.env.production`, 비밀키는 `supabase/.env.*.local`에 기록되며 실제 파일은 모두 Git에서 제외된다.
 - Supabase 배포 시 `supabase secrets set --env-file supabase/.env.<environment>.local`로 해당 프로젝트에 비밀값을 등록한다.
+- `SUPABASE_ACCESS_TOKEN`과 선택적인 `SUPABASE_DB_PASSWORD`는 로컬 CLI/CI 배포에만 사용하며 Cloudflare나 브라우저 빌드 변수로 등록하지 않는다.
+- `AUTH_SMTP_SENDER_DOMAIN`은 Auth 설정 감사에서 발신 도메인만 비교하기 위한 로컬 값이며 SMTP 비밀번호가 아니다.
+
+전체 migration과 함수를 적용하지 않고 검증된 함수만 개발 환경에 다시 배포할 때는 다음처럼 명시한다. 이 모드는 DB push와 secret 변경을 수행하지 않는다.
+
+```bash
+node scripts/deploy-supabase.mjs development --functions-only admin-actions delete-card-set
+```
 
 ## 배포 흐름
 
@@ -36,6 +44,9 @@
 | `.env.<environment>` | `VITE_SUPABASE_ANON_KEY` | 공개 | RLS가 적용되는 anon key |
 | `.env.<environment>` | `VITE_VAPID_PUBLIC_KEY` | 공개 | 브라우저 Push 구독 공개키 |
 | `.env.<environment>` | `VITE_PHONE_AUTH_ENABLED` | 공개 | 실제 지원되는 환경에서만 전화 인증 노출 |
+| `.env.<environment>` | `AUTH_SMTP_SENDER_DOMAIN` | 비공개 설정 | Auth 감사 시 예상 발신 도메인 비교 |
+| `.env.<environment>` | `SUPABASE_ACCESS_TOKEN` | 비밀 | 로컬 Supabase CLI/API 자동화 인증, 클라이언트 배포 금지 |
+| `.env.<environment>` | `SUPABASE_DB_PASSWORD` | 비밀 | 필요한 경우 연결된 DB migration 적용 |
 | `supabase/.env.<environment>.local` | `ALLOWED_ORIGINS` | 비공개 설정 | Edge Function CORS 허용 목록 |
 | `supabase/.env.<environment>.local` | `VAPID_PRIVATE_KEY` | 비밀 | Push 서명 키 |
 | `supabase/.env.<environment>.local` | `VAPID_SUBJECT` | 비공개 설정 | Push 운영자 연락처 |

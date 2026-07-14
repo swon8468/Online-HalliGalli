@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { getErrorMessage } from './errorMessage'
 
 export interface GameInvite {
   id: string
@@ -66,10 +67,29 @@ export async function cancelGameInvite(inviteId: string) {
 
 export function subscribeToGameInvites(userId: string, onChange: () => void) {
   if (!supabase) return () => undefined
-  const channel = supabase.channel(`game-invites:${userId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_invites' }, onChange)
-    .subscribe()
-  return () => { void supabase?.removeChannel(channel) }
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
+  const channel = supabase.channel(`game-invites:${userId}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'game_invites' }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void supabase?.removeChannel(channel) }
 }
 
 const MESSAGES: Record<string, string> = {
@@ -92,7 +112,7 @@ const MESSAGES: Record<string, string> = {
 }
 
 export function inviteErrorMessage(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error)
+  const raw = getErrorMessage(error)
   const key = Object.keys(MESSAGES).find(candidate => raw.includes(candidate))
   return key ? MESSAGES[key] : '게임 초대를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.'
 }

@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { createUuid } from './id'
 
 export type CardFruit = 'strawberry' | 'banana' | 'lime' | 'plum'
 export type CardSetStatus = 'draft' | 'published' | 'archived'
@@ -111,7 +112,7 @@ export async function uploadCardAsset(cardSetId: string, file: File, kind: strin
   if (!allowedTypes.has(file.type)) throw new Error('PNG, JPEG, WebP, SVG 이미지만 업로드할 수 있습니다.')
   if (file.size > 2 * 1024 * 1024) throw new Error('이미지는 2MB 이하여야 합니다.')
   const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
-  const path = `${cardSetId}/${kind}-${crypto.randomUUID()}.${extension}`
+  const path = `${cardSetId}/${kind}-${createUuid()}.${extension}`
   const { error } = await client().storage.from('card-assets').upload(path, file, { cacheControl: '31536000', upsert: false, contentType: file.type })
   if (error) throw error
   return path

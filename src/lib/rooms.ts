@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { createUuid } from './id'
 import { cardAssetUrl } from './cards'
 
 export interface RoomInfo {
@@ -39,6 +40,7 @@ export type ActiveSession =
 export type GameFruit = 'strawberry' | 'banana' | 'lime' | 'plum'
 
 export interface GameTableCard {
+  cardId?: string
   userId: string
   fruit: GameFruit
   count: number
@@ -310,7 +312,7 @@ export async function loadGameView(gameId: string): Promise<GameView> {
 
 export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: createUuid() })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId }))
   if (error) throw error
   return data as GameSnapshot
@@ -318,14 +320,14 @@ export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
 
 export async function ringGameBell(gameId: string) {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: createUuid() })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('attempt_ring', { p_game_id: gameId }))
   if (error) throw error
   return data as { accepted: boolean; correct?: boolean; reason?: string; state: GameSnapshot }
 }
 
 export async function abandonGame(gameId: string): Promise<GameSnapshot> {
-  const { data, error } = await requireSupabase().rpc('abandon_game', { p_game_id: gameId, p_action_id: crypto.randomUUID() })
+  const { data, error } = await requireSupabase().rpc('abandon_game', { p_game_id: gameId, p_action_id: createUuid() })
   if (error) throw error
   return data as GameSnapshot
 }
@@ -345,8 +347,10 @@ export async function returnFinishedGameToRoom(gameId: string): Promise<RoomInfo
 }
 
 export async function findMyActiveSession(): Promise<ActiveSession | null> {
-  const { data, error } = await requireSupabase().rpc('get_my_active_session')
-  if (error?.code === 'PGRST202') return null
+  // A missing client is the intentional local demo mode. Once a client is
+  // configured, every lookup error must still propagate to the entry gate.
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('get_my_active_session')
   if (error) throw error
   if (!data || typeof data !== 'object') return null
   const session = data as Record<string, unknown>
@@ -380,29 +384,62 @@ export async function markGameSessionDisconnected(gameId: string) {
 export function subscribeToGame(gameId: string, onChange: () => void) {
   const client = supabase
   if (!client) return () => undefined
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
   // A unique topic avoids an old async cleanup closing a replacement channel
   // during React StrictMode remounts or fast route transitions.
-  const channel = client.channel(`game:${gameId}:${crypto.randomUUID()}`)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, onChange)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, onChange)
-    .subscribe(status => {
-      // A change can happen after the initial fetch but before Realtime finishes
-      // subscribing. Reconcile once the channel is ready so that state is not lost.
-      if (status === 'SUBSCRIBED') onChange()
+  const channel = client.channel(`game:${gameId}:${createUuid()}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, reconcile)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` }, reconcile)
+    .on('system', {}, payload => {
+      // Joining the websocket topic does not mean Postgres replication is ready.
+      // Reconcile after the server confirms the WAL stream so updates made in
+      // the short join/replication gap cannot leave the screen stale.
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void client.removeChannel(channel) }
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void client.removeChannel(channel) }
 }
 
 export function subscribeToRoom(roomId: string, onChange: () => void) {
   const client = supabase
   if (!client) return () => undefined
-  const channel = client.channel(`room:${roomId}:${crypto.randomUUID()}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, onChange)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, onChange)
-    .subscribe(status => {
-      // Reconcile the gap between the first REST fetch and the completed
-      // Realtime subscription. Fast joins must not wait for the heartbeat.
-      if (status === 'SUBSCRIBED') onChange()
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
+  const channel = client.channel(`room:${roomId}:${createUuid()}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, reconcile)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
     })
-  return () => { void client.removeChannel(channel) }
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void client.removeChannel(channel) }
 }

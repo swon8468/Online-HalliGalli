@@ -9,6 +9,9 @@ const gameMarkers = [
   "showImpact('success', '정답!'",
   "showImpact('error', '오답!'",
   '벌칙 카드 1장을 보냅니다',
+  'practiceBotWrongPendingMessage',
+  'practiceBotRingMessage(next, correct)',
+  'data-card-id={card.cardId}',
   'motion.count ?? 1',
   'game-impact is-${impact.type}',
 ]

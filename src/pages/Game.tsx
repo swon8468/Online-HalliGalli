@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Fruit } from '../components/Fruit'
-import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTopCards, practiceDifficulty, practiceIsExactFive, revealPracticeCard, ringPracticeBell, type PracticeActor, type PracticeCard, type PracticeDifficulty, type PracticeGameState } from '../game/practiceEngine'
+import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTopCards, practiceBotRingMessage, practiceBotWrongPendingMessage, practiceDifficulty, practiceIsExactFive, revealPracticeCard, ringPracticeBell, type PracticeActor, type PracticeCard, type PracticeDifficulty, type PracticeGameState } from '../game/practiceEngine'
 import { loadGameSettings, playGameSound, saveGameSettings, vibrateGame, type GameSettings } from '../game/settings'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
+import { getErrorMessage } from '../lib/errorMessage'
 import { abandonGame, findMyActiveSession, loadGameView, requestGameRematch, returnFinishedGameToRoom, revealGameCard, ringGameBell, subscribeToGame, type GameCardTheme, type GamePlayerInfo, type GameSnapshot, type GameTableCard } from '../lib/rooms'
 
 const emptyState: GameSnapshot = {
@@ -14,7 +15,7 @@ const emptyState: GameSnapshot = {
 }
 
 function gameErrorMessage(caught: unknown) {
-  const message = caught instanceof Error ? caught.message : ''
+  const message = getErrorMessage(caught)
   if (message.includes('not your turn')) return '아직 내 차례가 아니에요.'
   if (message.includes('already_rung')) return '이번 카드에서는 이미 종이 울렸어요.'
   if (message.includes('no cards')) return '뒤집을 카드가 없어요.'
@@ -28,7 +29,7 @@ function gameErrorMessage(caught: unknown) {
 }
 
 function toTableCard(owner: PracticeActor, card: PracticeCard | null): GameTableCard | null {
-  return card ? { userId: owner, fruit: card.fruit, count: card.count } : null
+  return card ? { cardId: card.id, userId: owner, fruit: card.fruit, count: card.count } : null
 }
 
 function FaceCard({ card, owner, theme, isMine = false, eliminated = false }: { card?: GameTableCard | null; owner: string; theme?: GameCardTheme | null; isMine?: boolean; eliminated?: boolean }) {
@@ -37,7 +38,7 @@ function FaceCard({ card, owner, theme, isMine = false, eliminated = false }: { 
   const [assetFailed, setAssetFailed] = useState(false)
   useEffect(() => { setAssetFailed(false) }, [design?.assetUrl])
   return card
-    ? <div className={className} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111' }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt={`${design.label || card.fruit} ${card.count}개`} onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" />}<small>{owner}의 공개 카드</small></div>
+    ? <div className={className} data-card-id={card.cardId} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111' }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt={`${design.label || card.fruit} ${card.count}개`} onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" />}<small>{owner}의 공개 카드</small></div>
     : <div className={className}><span>{eliminated ? '탈락' : '공개 카드'}</span><small>{owner}</small></div>
 }
 
@@ -57,6 +58,7 @@ export default function Game() {
   const isBotMode = searchParams.get('mode') === 'bot'
   const requestedDifficulty = searchParams.get('difficulty')
   const difficulty: PracticeDifficulty = requestedDifficulty === 'easy' || requestedDifficulty === 'hard' ? requestedDifficulty : 'normal'
+  const testBotRing = import.meta.env.MODE === 'e2e' ? searchParams.get('_testBotRing') : null
   const gameId = searchParams.get('game')
   const [settings, setSettings] = useState<GameSettings>(() => loadGameSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -71,11 +73,23 @@ export default function Game() {
   const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [rematchBusy, setRematchBusy] = useState(false)
   const [roomBusy, setRoomBusy] = useState(false)
+  const [loadedGameId, setLoadedGameId] = useState<string | null>(null)
+  const [failedGameId, setFailedGameId] = useState<string | null>(null)
+  const [sessionLookupState, setSessionLookupState] = useState<'idle' | 'loading' | 'failed' | 'none'>('idle')
+  const [sessionLookupAttempt, setSessionLookupAttempt] = useState(0)
   const tableRef = useRef<GameTableCard[]>([])
   const versionRef = useRef<number | null>(null)
+  const activeGameIdRef = useRef(gameId)
+  const loadedGameIdRef = useRef<string | null>(null)
+  const initializedRouteGameIdRef = useRef<string | null>(null)
+  const gameViewRequestRef = useRef<{ gameId: string; promise: ReturnType<typeof loadGameView> } | null>(null)
+  const sessionLookupPromiseRef = useRef<ReturnType<typeof findMyActiveSession> | null>(null)
   const [practice, setPractice] = useState(() => createPracticeGame())
+  const [practicePauseVersion, setPracticePauseVersion] = useState<number | null>(null)
   const practiceRef = useRef(practice)
+  activeGameIdRef.current = gameId
   const botActionVersionRef = useRef<number | null>(null)
+  const forcedBotRingUsedRef = useRef(false)
   const practiceBusyRef = useRef(false)
   const resultFxRef = useRef('')
   const impactTimerRef = useRef<number | null>(null)
@@ -118,10 +132,33 @@ export default function Game() {
     setBusy(false)
   }, [])
 
-  const refresh = useCallback(async () => {
+  const requestGameView = useCallback(() => {
+    if (!gameId) return null
+    if (gameViewRequestRef.current?.gameId === gameId) return gameViewRequestRef.current.promise
+    const promise = loadGameView(gameId).finally(() => {
+      if (gameViewRequestRef.current?.promise === promise) gameViewRequestRef.current = null
+    })
+    gameViewRequestRef.current = { gameId, promise }
+    return promise
+  }, [gameId])
+
+  const requestActiveSession = useCallback(() => {
+    if (!sessionLookupPromiseRef.current) {
+      sessionLookupPromiseRef.current = findMyActiveSession().finally(() => { sessionLookupPromiseRef.current = null })
+    }
+    return sessionLookupPromiseRef.current
+  }, [])
+
+  const refresh = useCallback(async (ensureFresh = false) => {
     if (!gameId || isBotMode) return
+    if (ensureFresh && gameViewRequestRef.current?.gameId === gameId) {
+      await gameViewRequestRef.current.promise.catch(() => undefined)
+    }
     try {
-      const view = await loadGameView(gameId)
+      const request = requestGameView()
+      if (!request) return
+      const view = await request
+      if (activeGameIdRef.current !== gameId) return
       if (versionRef.current !== null && view.state.version !== versionRef.current) {
         const result = view.state.lastResult
         if (result?.type === 'reveal') {
@@ -135,6 +172,9 @@ export default function Game() {
       }
       versionRef.current = view.state.version
       tableRef.current = view.state.table
+      loadedGameIdRef.current = gameId
+      setLoadedGameId(gameId)
+      setFailedGameId(null)
       setPlayers(view.players)
       setState(view.state)
       setTheme(view.theme)
@@ -158,40 +198,78 @@ export default function Game() {
           : `${mine ? '오답이에요.' : `${actor?.nickname ?? '상대방'}님이 잘못 울렸어요.`} 다른 플레이어에게 한 장씩 줍니다.`)
       } else if (view.state.currentTurn === user?.id) setMessage('내 차례예요. 아래 카드 더미를 누르세요.')
       else setMessage('상대방이 카드를 뒤집을 차례예요.')
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
-  }, [animateCards, gameId, isBotMode, navigate, showImpact, user?.id])
+    } catch (caught) {
+      if (activeGameIdRef.current !== gameId) return
+      setMessage(gameErrorMessage(caught))
+      if (loadedGameIdRef.current !== gameId) setFailedGameId(gameId)
+    }
+  }, [animateCards, gameId, isBotMode, navigate, requestGameView, showImpact, user?.id])
 
   const connection = useSessionHeartbeat('game', isBotMode ? null : gameId, () => void refresh())
 
   useEffect(() => {
     if (isBotMode) { setMessage('내 차례예요. 아래 카드 더미를 누르세요.'); return }
     if (!gameId) {
+      let active = true
       setMessage('진행 중인 게임을 찾고 있어요.')
-      void findMyActiveSession().then(session => {
+      setSessionLookupState('loading')
+      void requestActiveSession().then(session => {
+        if (!active) return
         if (session?.type === 'game') navigate(`/game?game=${encodeURIComponent(session.gameId)}`, { replace: true })
-        else setMessage('진행 중인 게임이 없습니다.')
-      }).catch(() => setMessage('진행 중인 게임을 확인하지 못했습니다.'))
-      return
+        else if (session?.type === 'room') navigate(`/room/${encodeURIComponent(session.roomId)}`, { replace: true })
+        else { setMessage('진행 중인 게임이 없습니다.'); setSessionLookupState('none') }
+      }).catch(() => { if (active) { setMessage('진행 중인 게임을 확인하지 못했습니다.'); setSessionLookupState('failed') } })
+      return () => { active = false }
     }
+    if (initializedRouteGameIdRef.current !== gameId) {
+      initializedRouteGameIdRef.current = gameId
+      loadedGameIdRef.current = null
+      setLoadedGameId(null)
+      setPlayers([])
+      setState(emptyState)
+      setTheme(null)
+      setFeedback(null)
+      setImpact(null)
+      setMotion(null)
+      versionRef.current = null
+      tableRef.current = []
+    }
+    setSessionLookupState('idle')
     void refresh()
     return subscribeToGame(gameId, () => void refresh())
-  }, [gameId, isBotMode, navigate, refresh])
+  }, [gameId, isBotMode, navigate, refresh, requestActiveSession, sessionLookupAttempt])
 
   // Realtime is the primary transport, but a browser can miss an update while
   // its websocket is reconnecting. Poll only on the low-activity result screen
   // so a unanimous rematch always moves every player to the same new game.
   useEffect(() => {
     if (isBotMode || !gameId || state.phase !== 'finished' || state.rematchGameId) return
-    const timer = window.setInterval(() => void refresh(), 1000)
-    return () => window.clearInterval(timer)
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const timer = window.setInterval(reconcile, 5_000)
+    window.addEventListener('focus', reconcile)
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', reconcile)
+      document.removeEventListener('visibilitychange', visibilityChanged)
+    }
   }, [gameId, isBotMode, refresh, state.phase, state.rematchGameId])
 
   useEffect(() => {
-    if (!isBotMode || practice.phase !== 'playing' || busy || botActionVersionRef.current === practice.version) return
+    if (!isBotMode || practice.phase !== 'playing' || busy || practicePauseVersion === practice.version || botActionVersionRef.current === practice.version) return
     botActionVersionRef.current = practice.version
     const config = practiceDifficulty[difficulty]
     const exactFive = practiceIsExactFive(practice)
-    const botDecision = decideBotBell(practice, difficulty)
+    let botDecision = decideBotBell(practice, difficulty)
+    if (testBotRing === 'wrong' && !forcedBotRingUsedRef.current && !exactFive && getPracticeTableCards(practice).length > 0) {
+      forcedBotRingUsedRef.current = true
+      botDecision = 'ring'
+    }
 
     if (botDecision === 'ring') {
       setMessage(exactFive ? '봇도 다섯을 발견했어요. 누가 먼저 누를까요?' : '봇이 종을 누르려는 것 같아요...')
@@ -207,14 +285,15 @@ export default function Game() {
           await animateCards('collect-opponent', 820, cards)
         }
         if (!correct) {
+          setFeedback('error')
+          setMessage(practiceBotWrongPendingMessage)
           playGameSound('wrong', settings)
           await animateCards('penalty-opponent', 900, undefined, 1)
         }
         commitPractice(next)
-        setFeedback(null)
-        setMessage(next.phase === 'finished'
-          ? '봇이 게임에서 승리했어요.'
-          : correct ? '봇이 먼저 정답 종을 눌러 공개 카드를 가져갔어요.' : '봇도 실수했어요. 카드 한 장을 내게 줬어요.')
+        if (next.phase === 'playing') setPracticePauseVersion(next.version)
+        setFeedback(correct ? null : 'error')
+        setMessage(practiceBotRingMessage(next, correct))
         endPracticeAction()
       }, config.reactionMs)
       return () => window.clearTimeout(timer)
@@ -240,7 +319,13 @@ export default function Game() {
       endPracticeAction()
     }, config.revealMs)
     return () => window.clearTimeout(timer)
-  }, [animateCards, beginPracticeAction, busy, commitPractice, difficulty, endPracticeAction, isBotMode, practice, settings])
+  }, [animateCards, beginPracticeAction, busy, commitPractice, difficulty, endPracticeAction, isBotMode, practice, practicePauseVersion, settings, testBotRing])
+
+  useEffect(() => {
+    if (practicePauseVersion === null) return
+    const timer = window.setTimeout(() => setPracticePauseVersion(null), settings.reducedMotion ? 450 : 1400)
+    return () => window.clearTimeout(timer)
+  }, [practicePauseVersion, settings.reducedMotion])
 
   useEffect(() => {
     const finished = isBotMode ? practice.phase === 'finished' : state.phase === 'finished'
@@ -291,10 +376,17 @@ export default function Game() {
       return
     }
     if (!gameId) return
+    const actionGameId = gameId
     setBusy(true)
-    try { await animateCards('play-player', 460); setState(await revealGameCard(gameId)); await refresh() }
-    catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setBusy(false) }
+    try {
+      await animateCards('play-player', 460)
+      const nextState = await revealGameCard(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
+      setState(nextState)
+      await refresh(true)
+    }
+    catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
   }
 
   const ring = async () => {
@@ -327,59 +419,71 @@ export default function Game() {
       return
     }
     if (!gameId) return
+    const actionGameId = gameId
     setBusy(true)
     try {
-      const result = await ringGameBell(gameId)
+      const result = await ringGameBell(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       if (!result.accepted) setMessage(result.reason === 'already_rung' ? '이번 카드에서는 이미 종이 울렸어요.' : '종을 울릴 수 없어요.')
       else {
         playGameSound(result.correct ? 'correct' : 'wrong', settings)
         vibrateGame(result.correct ? [45, 35, 70] : 140, settings)
       }
-      await refresh()
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setBusy(false) }
+      await refresh(true)
+    } catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
   }
 
   const exitGame = async () => {
     setShowExitConfirm(false)
     if (isBotMode || !gameId || state.phase === 'finished') { navigate('/'); return }
+    const actionGameId = gameId
     setBusy(true)
     try {
-      await abandonGame(gameId)
+      await abandonGame(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       navigate('/', { replace: true })
     } catch (caught) {
       setMessage(gameErrorMessage(caught))
-      setBusy(false)
+      if (activeGameIdRef.current === actionGameId) setBusy(false)
     }
   }
 
   const rematch = async () => {
     if (!gameId || rematchBusy) return
+    const actionGameId = gameId
     setRematchBusy(true)
     try {
-      const result = await requestGameRematch(gameId)
+      const result = await requestGameRematch(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       if (result.ready && result.gameId) navigate(`/game?game=${encodeURIComponent(result.gameId)}`, { replace: true })
       else {
         setState(result.state)
         setMessage('재경기를 요청했어요. 다른 플레이어를 기다리고 있어요.')
       }
-    } catch (caught) { setMessage(gameErrorMessage(caught)) }
-    finally { setRematchBusy(false) }
+    } catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
+    finally { if (activeGameIdRef.current === actionGameId) setRematchBusy(false) }
   }
 
   const returnToRoom = async () => {
     if (!gameId || roomBusy) return
+    const actionGameId = gameId
     setRoomBusy(true)
     try {
-      const room = await returnFinishedGameToRoom(gameId)
+      const room = await returnFinishedGameToRoom(actionGameId)
+      if (activeGameIdRef.current !== actionGameId) return
       navigate(`/room/${encodeURIComponent(room.id)}`, { replace: true })
-    } catch (caught) { setMessage(gameErrorMessage(caught)); setRoomBusy(false) }
+    } catch (caught) {
+      if (activeGameIdRef.current === actionGameId) { setMessage(gameErrorMessage(caught)); setRoomBusy(false) }
+    }
   }
 
   const restartPractice = () => {
     const next = createPracticeGame()
     botActionVersionRef.current = null
+    forcedBotRingUsedRef.current = false
     practiceBusyRef.current = false
+    setPracticePauseVersion(null)
     commitPractice(next)
     setFeedback(null)
     setBusy(false)
@@ -396,6 +500,24 @@ export default function Game() {
     background: theme.backAssetUrl ? `url("${theme.backAssetUrl}") center / cover no-repeat` : theme.backStyle.background ?? '#0878dd',
     color: theme.backStyle.accent ?? '#ffffff',
   } : undefined
+
+  if (!isBotMode && !gameId) {
+    return <div className="route-loading" aria-live="polite"><div className="route-status-card" role={sessionLookupState === 'failed' ? 'alert' : 'status'}>
+      <strong>{sessionLookupState === 'loading' ? '진행 중인 게임을 확인하고 있어요.' : sessionLookupState === 'failed' ? '진행 중인 게임을 확인하지 못했어요.' : '진행 중인 게임이 없어요.'}</strong>
+      <p>{sessionLookupState === 'failed' ? '연결을 확인한 뒤 다시 시도해 주세요.' : sessionLookupState === 'none' ? '홈에서 방을 만들거나 연습 게임을 시작해 보세요.' : '잠시만 기다려 주세요.'}</p>
+      {sessionLookupState === 'failed' && <button className="primary-button" onClick={() => setSessionLookupAttempt(value => value + 1)}>다시 확인</button>}
+      {sessionLookupState === 'none' && <button className="primary-button" onClick={() => navigate('/', { replace: true })}>홈으로 돌아가기</button>}
+    </div></div>
+  }
+
+  if (!isBotMode && gameId && loadedGameId !== gameId) {
+    const loadFailed = failedGameId === gameId
+    return <div className="route-loading" aria-live="polite"><div className="route-status-card" role={loadFailed ? 'alert' : 'status'}>
+      <strong>{loadFailed ? '게임 상태를 불러오지 못했어요.' : '게임 상태를 불러오고 있어요.'}</strong>
+      <p>{loadFailed ? '연결을 확인한 뒤 다시 시도해 주세요.' : '새 게임의 최신 상태를 확인하고 있습니다.'}</p>
+      {loadFailed && <button className="primary-button" onClick={() => { setFailedGameId(null); void refresh(true) }}>다시 불러오기</button>}
+    </div></div>
+  }
 
   return (
     <div className="game-page game-page--arena">
@@ -415,7 +537,7 @@ export default function Game() {
           <div className={`turn-pill ${myTurn ? 'is-mine' : ''}`}>{myTurn ? '내 차례' : isBotMode ? '봇 차례' : `${turnPlayer?.nickname ?? '상대'} 차례`}</div>
           <div className={`center-playfield center-playfield--${tableSeats.length}`}>
             <div className={`table-face-grid table-face-grid--${tableSeats.length}`} aria-label="공개 카드 영역">
-              {tableSeats.map(seat => <FaceCard card={seat.card} owner={seat.nickname} theme={isBotMode ? null : theme} isMine={seat.isMine} eliminated={seat.eliminated} key={seat.id} />)}
+              {tableSeats.map(seat => <FaceCard card={seat.card} owner={seat.nickname} theme={isBotMode ? null : theme} isMine={seat.isMine} eliminated={seat.eliminated} key={`${seat.id}-${seat.card?.cardId ?? 'empty'}`} />)}
             </div>
             <button className="arena-bell" onClick={() => void ring()} disabled={busy || me?.eliminated || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || bellLocked || (isBotMode ? getPracticeTableCards(practice).length === 0 : state.table.length === 0)} aria-label="종 울리기"><span /><Bell /><strong>{bellLocked ? '다음 카드까지 대기' : '종 울리기'}</strong></button>
           </div>
@@ -471,7 +593,7 @@ export default function Game() {
       </section>}
       {settingsOpen && <section className="game-settings-overlay" role="dialog" aria-modal="true" aria-labelledby="game-settings-title">
         <div className="game-settings-card">
-          <header><div><Settings /><span><small>GAME SETTINGS</small><h2 id="game-settings-title">게임 환경 설정</h2></span></div><button aria-label="게임 설정 닫기" onClick={() => setSettingsOpen(false)}><X /></button></header>
+          <header><div><Settings /><span><small>GAME SETTINGS</small><h2 id="game-settings-title">게임 환경 설정</h2></span></div><button data-dialog-dismiss aria-label="게임 설정 닫기" onClick={() => setSettingsOpen(false)}><X /></button></header>
           <label className="game-setting-toggle"><span><strong>효과음</strong><small>카드, 종, 판정 및 승패 효과음</small></span><input type="checkbox" checked={!settings.muted} onChange={event => setSettings(value => ({ ...value, muted: !event.target.checked }))} /></label>
           <label className="game-setting-range"><span><strong>음량</strong><output>{Math.round(settings.volume * 100)}%</output></span><input type="range" min="0" max="100" value={Math.round(settings.volume * 100)} disabled={settings.muted} onChange={event => setSettings(value => ({ ...value, volume: Number(event.target.value) / 100 }))} /></label>
           <label className="game-setting-toggle"><span><strong>진동</strong><small>지원 기기에서 종과 판정에 반응</small></span><input type="checkbox" checked={settings.vibration} onChange={event => setSettings(value => ({ ...value, vibration: event.target.checked }))} /></label>
@@ -481,7 +603,7 @@ export default function Game() {
         </div>
       </section>}
       {showExitConfirm && <section className="game-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="exit-game-title">
-        <div className="game-confirm-card"><LogOut /><h2 id="exit-game-title">게임에서 나갈까요?</h2><p>{isBotMode ? '현재 연습 기록은 저장되지 않아요.' : state.phase === 'finished' ? '게임 결과는 저장되어 있어요.' : '진행 중 나가면 기권 처리되고 남은 플레이어가 게임을 이어갑니다.'}</p><div><button className="secondary-button" onClick={() => setShowExitConfirm(false)}>계속 플레이</button><button className="danger-button" onClick={() => void exitGame()} disabled={busy}>게임 나가기</button></div></div>
+        <div className="game-confirm-card"><LogOut /><h2 id="exit-game-title">게임에서 나갈까요?</h2><p>{isBotMode ? '현재 연습 기록은 저장되지 않아요.' : state.phase === 'finished' ? '게임 결과는 저장되어 있어요.' : '진행 중 나가면 기권 처리되고 남은 플레이어가 게임을 이어갑니다.'}</p><div><button data-dialog-dismiss className="secondary-button" onClick={() => setShowExitConfirm(false)}>계속 플레이</button><button className="danger-button" onClick={() => void exitGame()} disabled={busy}>게임 나가기</button></div></div>
       </section>}
     </div>
   )

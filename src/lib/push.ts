@@ -50,5 +50,5 @@ export async function disablePushNotifications() {
   if (!subscription) return
   const { error } = await supabase.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint)
   if (error) throw error
-  await subscription.unsubscribe()
+  if (!await subscription.unsubscribe()) throw new Error('브라우저의 푸시 구독을 해제하지 못했어요. 잠시 후 다시 시도해 주세요.')
 }

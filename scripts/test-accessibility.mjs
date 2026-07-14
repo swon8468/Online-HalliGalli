@@ -21,12 +21,27 @@ for (const [file, source] of sources) {
   }
 }
 if (!sources.get('src/components/Layout.tsx')?.includes('<DialogFocusManager />')) throw new Error('전역 모달 포커스 관리자가 연결되지 않았습니다.')
-if (!sources.get('src/components/DialogFocusManager.tsx')?.includes("event.key !== 'Tab'")) throw new Error('모달 Tab 포커스 트랩이 없습니다.')
+const focusManager = sources.get('src/components/DialogFocusManager.tsx') ?? ''
+if (!focusManager.includes("event.key !== 'Tab'")) throw new Error('모달 Tab 포커스 트랩이 없습니다.')
+if (!focusManager.includes("event.key === 'Escape'") || !focusManager.includes('dismissControl(activeDialog)')) throw new Error('모달 Escape 닫기 처리가 없습니다.')
 const css = sources.get('src/styles.css') ?? ''
 for (const marker of [':focus-visible', '@media (pointer: coarse)', '@media (max-width: 360px)', '@media (prefers-reduced-motion: reduce)']) {
   if (!css.includes(marker)) throw new Error(`반응형/접근성 스타일 누락: ${marker}`)
 }
 const index = await readFile('index.html', 'utf8')
 if (!index.includes('viewport-fit=cover')) throw new Error('safe-area viewport 설정 누락')
+const [friends, invites, matchmaking] = await Promise.all([
+  readFile('src/lib/friends.ts', 'utf8'),
+  readFile('src/lib/invites.ts', 'utf8'),
+  readFile('src/lib/matchmaking.ts', 'utf8'),
+])
+const reconcilesAfterSubscribe = source => (
+  source.includes('replication_ready: true')
+  && source.includes(".on('system'")
+  && /payload\.status === 'ok'[^}]{0,160}(?:onChange|reconcile)\(\)/.test(source)
+)
+if (![friends, invites, matchmaking].every(reconcilesAfterSubscribe)) {
+  throw new Error('Realtime 초기 조회와 구독 사이의 상태 공백을 복구하지 않습니다.')
+}
 
-console.log(`verified ${dialogs.length} labelled modal dialogs, image alternatives, focus trapping, visible focus, touch targets, reduced motion, safe-area, and 360px safeguards`)
+console.log(`verified ${dialogs.length} labelled modal dialogs, image alternatives, focus trapping, visible focus, touch targets, reduced motion, safe-area, 360px safeguards, and Realtime subscription reconciliation`)

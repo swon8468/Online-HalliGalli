@@ -1,14 +1,15 @@
 import { Check, LoaderCircle, Radio, UserRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
-import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus } from '../lib/matchmaking'
+import { getErrorMessage } from '../lib/errorMessage'
+import { cancelMatchmaking, getMatchmakingStatus, heartbeatMatchmaking, joinMatchmaking, subscribeToMatchmaking, subscribeToOnlinePresence, type MatchmakingStatus, type PresenceConnectionState } from '../lib/matchmaking'
 
 const idleStatus: MatchmakingStatus = { status: 'idle', queueCount: 0, members: [] }
 
 function matchingError(error: unknown) {
-  const message = error instanceof Error ? error.message : ''
+  const message = getErrorMessage(error)
   if (message.includes('active room or game')) return '이미 참여 중인 방이나 게임이 있어요.'
   if (message.includes('match already created')) return '이미 매칭이 완료되어 게임으로 이동합니다.'
   if (message.includes('invalid player count')) return '2명부터 6명까지 선택해 주세요.'
@@ -23,7 +24,17 @@ export default function Online() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [onlineCount, setOnlineCount] = useState(1)
+  const [presenceState, setPresenceState] = useState<PresenceConnectionState>('connecting')
   const [error, setError] = useState('')
+  const statusRequestRef = useRef<Promise<MatchmakingStatus> | null>(null)
+  const operationVersionRef = useRef(0)
+
+  const requestStatus = useCallback(() => {
+    if (!statusRequestRef.current) {
+      statusRequestRef.current = getMatchmakingStatus().finally(() => { statusRequestRef.current = null })
+    }
+    return statusRequestRef.current
+  }, [])
 
   const applyStatus = useCallback((next: MatchmakingStatus) => {
     setStatus(next)
@@ -36,49 +47,68 @@ export default function Online() {
   useEffect(() => {
     if (!user) return
     let active = true
-    const refresh = async () => {
-      try {
-        const next = await getMatchmakingStatus()
-        if (active) applyStatus(next)
-      } catch (caught) {
-        if (active) setError(matchingError(caught))
-      } finally {
-        if (active) setLoading(false)
-      }
+    const refresh = () => {
+      const version = operationVersionRef.current
+      return requestStatus()
+        .then(next => { if (active && operationVersionRef.current === version) applyStatus(next) })
+        .catch(caught => { if (active) setError(matchingError(caught)) })
+        .finally(() => { if (active) setLoading(false) })
     }
     void refresh()
     const unsubscribeQueue = subscribeToMatchmaking(user.id, () => void refresh())
-    const unsubscribePresence = subscribeToOnlinePresence(user.id, value => active && setOnlineCount(value))
+    const unsubscribePresence = subscribeToOnlinePresence(
+      user.id,
+      value => active && setOnlineCount(value),
+      next => active && setPresenceState(next),
+    )
     return () => { active = false; unsubscribeQueue(); unsubscribePresence() }
-  }, [applyStatus, user])
+  }, [applyStatus, requestStatus, user])
 
   useEffect(() => {
     if (status.status !== 'waiting') return
-    const pulse = async () => {
-      try { applyStatus(await heartbeatMatchmaking()) }
-      catch (caught) { setError(matchingError(caught)) }
+    let active = true
+    let pulsePromise: Promise<void> | null = null
+    const pulse = () => {
+      if (pulsePromise) return pulsePromise
+      const version = operationVersionRef.current
+      pulsePromise = heartbeatMatchmaking()
+        .then(next => { if (active && operationVersionRef.current === version) applyStatus(next) })
+        .catch(caught => { if (active) setError(matchingError(caught)) })
+        .finally(() => { pulsePromise = null })
+      return pulsePromise
     }
     const timer = window.setInterval(() => void pulse(), 10_000)
     const reconnect = () => void pulse()
     window.addEventListener('online', reconnect)
-    return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect) }
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('online', reconnect) }
   }, [applyStatus, status.status])
 
   const start = async () => {
+    const version = ++operationVersionRef.current
     setBusy(true)
     setError('')
-    try { applyStatus(await joinMatchmaking(count)) }
+    try {
+      const next = await joinMatchmaking(count)
+      if (operationVersionRef.current === version) applyStatus(next)
+    }
     catch (caught) { setError(matchingError(caught)) }
     finally { setBusy(false); setLoading(false) }
   }
 
   const cancel = async () => {
+    const version = ++operationVersionRef.current
     setBusy(true)
     setError('')
-    try { applyStatus(await cancelMatchmaking()) }
+    try {
+      const next = await cancelMatchmaking()
+      if (operationVersionRef.current === version) applyStatus(next)
+    }
     catch (caught) {
       setError(matchingError(caught))
-      try { applyStatus(await getMatchmakingStatus()) } catch { /* keep the original error */ }
+      try {
+        const next = await getMatchmakingStatus()
+        if (operationVersionRef.current === version) applyStatus(next)
+      } catch { /* keep the original error */ }
     } finally { setBusy(false) }
   }
 
@@ -116,7 +146,7 @@ export default function Online() {
         <div className="count-options">
           {[2, 3, 4, 5, 6].map(value => <button className={count === value ? 'is-selected' : ''} onClick={() => setCount(value)} disabled={loading || busy} key={value}><strong>{value}</strong><span>명</span>{count === value && <Check />}</button>)}
         </div>
-        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>현재 온라인 {onlineCount}명 · 실제 접속 상태</small></span><i>LIVE</i></div>
+        <div className="queue-info"><Radio /><span><strong>{count}인 대기열</strong><small>{presenceState === 'connected' ? `현재 온라인 ${onlineCount}명 · 실제 접속 상태` : presenceState === 'error' ? '온라인 인원을 확인하지 못했어요.' : '온라인 인원을 확인하고 있어요.'}</small></span><i>{presenceState === 'connected' ? 'LIVE' : presenceState === 'error' ? 'ERROR' : '...'}</i></div>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button full-button" onClick={() => void start()} disabled={loading || busy}>{loading ? '대기열 확인 중...' : busy ? '참가하는 중...' : '매칭 시작'}</button>
       </section>

@@ -20,11 +20,14 @@ type Payload = AccountInput & {
 const origins = (Deno.env.get('ALLOWED_ORIGINS') ?? 'https://develop.haligali.swonport.kr,https://haligali.swonport.kr,https://develop.admin.haligali.swonport.kr,https://admin.haligali.swonport.kr')
   .split(',').map(value => value.trim()).filter(Boolean)
 
+function isAllowedOrigin(origin: string) {
+  return origins.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+}
+
 function headers(request: Request) {
   const origin = request.headers.get('Origin') ?? ''
-  const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
   return {
-    'Access-Control-Allow-Origin': origins.includes(origin) || local ? origin : origins[0],
+    ...(isAllowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',
@@ -39,10 +42,10 @@ function randomPassword() { return `Hg-${crypto.randomUUID().replaceAll('-', '')
 function checkError(error: { message: string } | null, context: string) { if (error) throw new Error(`${context}: ${error.message}`) }
 
 Deno.serve(async request => {
+  const origin = request.headers.get('Origin') ?? ''
+  if (origin && !isAllowedOrigin(origin)) return response(request, { error: 'origin_not_allowed' }, 403)
   if (request.method === 'OPTIONS') return response(request, { ok: true })
   if (request.method !== 'POST') return response(request, { error: 'method_not_allowed' }, 405)
-  const origin = request.headers.get('Origin') ?? ''
-  if (origin && headers(request)['Access-Control-Allow-Origin'] !== origin) return response(request, { error: 'origin_not_allowed' }, 403)
 
   try {
     const authorization = request.headers.get('Authorization')

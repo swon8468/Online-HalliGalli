@@ -16,6 +16,8 @@ export interface MatchmakingStatus {
   heartbeatAt?: string
 }
 
+export type PresenceConnectionState = 'connecting' | 'connected' | 'error'
+
 function client() {
   if (!supabase) throw new Error('Supabase가 설정되지 않았습니다.')
   return supabase
@@ -48,24 +50,48 @@ export const cancelMatchmaking = () => rpc('cancel_matchmaking')
 
 export function subscribeToMatchmaking(userId: string, onChange: () => void) {
   if (!supabase) return () => undefined
-  const channel = supabase.channel(`matchmaking:${userId}`)
+  let disposed = false
+  let replicationReconciled = false
+  const reconcile = () => { if (!disposed) onChange() }
+  const channel = supabase.channel(`matchmaking:${userId}`, {
+    config: { broadcast: { replication_ready: true } },
+  })
     .on('postgres_changes', {
       event: '*', schema: 'public', table: 'matchmaking_queue', filter: `user_id=eq.${userId}`,
-    }, onChange)
-    .subscribe()
-  return () => { void supabase?.removeChannel(channel) }
+    }, reconcile)
+    .on('system', {}, payload => {
+      if (payload.status === 'ok' && !replicationReconciled) {
+        replicationReconciled = true
+        reconcile()
+      } else if (payload.status === 'error') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        replicationReconciled = false
+        reconcile()
+      }
+    })
+  return () => { disposed = true; void supabase?.removeChannel(channel) }
 }
 
-export function subscribeToOnlineUsers(userId: string, onUsers: (userIds: Set<string>) => void) {
+export function subscribeToOnlineUsers(userId: string, onUsers: (userIds: Set<string>) => void, onStatus?: (state: PresenceConnectionState) => void) {
   if (!supabase) return () => undefined
+  onStatus?.('connecting')
   const channel = supabase.channel('online-users', { config: { presence: { key: userId } } })
     .on('presence', { event: 'sync' }, () => onUsers(new Set(Object.keys(channel.presenceState()))))
     .subscribe(status => {
-      if (status === 'SUBSCRIBED') void channel.track({ onlineAt: new Date().toISOString() })
+      if (status === 'SUBSCRIBED') {
+        onStatus?.('connected')
+        void channel.track({ onlineAt: new Date().toISOString() })
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') onStatus?.('error')
     })
   return () => { void supabase?.removeChannel(channel) }
 }
 
-export function subscribeToOnlinePresence(userId: string, onCount: (count: number) => void) {
-  return subscribeToOnlineUsers(userId, userIds => onCount(userIds.size))
+export function subscribeToOnlinePresence(userId: string, onCount: (count: number) => void, onStatus?: (state: PresenceConnectionState) => void) {
+  return subscribeToOnlineUsers(userId, userIds => onCount(userIds.size), onStatus)
 }

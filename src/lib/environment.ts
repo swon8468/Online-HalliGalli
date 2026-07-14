@@ -7,7 +7,8 @@ export const appUrls = {
   admin: import.meta.env.VITE_ADMIN_APP_URL ?? 'http://127.0.0.1:43127/admin',
 }
 
-export function isAdminHostname(hostname = window.location.hostname) {
+export function isAdminHostname(hostname = window.location.hostname, pathname = window.location.pathname) {
   return hostname === 'admin.haligali.swonport.kr'
     || hostname === 'develop.admin.haligali.swonport.kr'
+    || ((hostname === 'localhost' || hostname === '127.0.0.1') && (pathname === '/admin' || pathname.startsWith('/admin/')))
 }

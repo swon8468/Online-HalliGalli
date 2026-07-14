@@ -11,3 +11,27 @@ verify_jwt = true
 
 [functions.check-identifier]
 verify_jwt = false
+
+[auth.email.template.invite]
+subject = "[Halli Galli] 초대가 도착했어요"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.confirmation]
+subject = "[Halli Galli] 이메일 인증을 완료해 주세요"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "[Halli Galli] 비밀번호를 재설정해 주세요"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "[Halli Galli] 로그인 링크를 확인해 주세요"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.email_change]
+subject = "[Halli Galli] 이메일 변경을 확인해 주세요"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.reauthentication]
+subject = "[Halli Galli] 본인 확인 코드입니다"
+content_path = "./supabase/templates/reauthentication.html"

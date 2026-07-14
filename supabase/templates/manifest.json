@@ -1,0 +1,50 @@
+[
+  {
+    "id": "confirmation",
+    "file": "confirmation.html",
+    "subject": "[Halli Galli] 이메일 인증을 완료해 주세요",
+    "subjectKey": "mailer_subjects_confirmation",
+    "contentKey": "mailer_templates_confirmation_content",
+    "requiredPlaceholders": ["{{ .ConfirmationURL }}"]
+  },
+  {
+    "id": "recovery",
+    "file": "recovery.html",
+    "subject": "[Halli Galli] 비밀번호를 재설정해 주세요",
+    "subjectKey": "mailer_subjects_recovery",
+    "contentKey": "mailer_templates_recovery_content",
+    "requiredPlaceholders": ["{{ .ConfirmationURL }}"]
+  },
+  {
+    "id": "invite",
+    "file": "invite.html",
+    "subject": "[Halli Galli] 초대가 도착했어요",
+    "subjectKey": "mailer_subjects_invite",
+    "contentKey": "mailer_templates_invite_content",
+    "requiredPlaceholders": ["{{ .ConfirmationURL }}"]
+  },
+  {
+    "id": "magic_link",
+    "file": "magic_link.html",
+    "subject": "[Halli Galli] 로그인 링크를 확인해 주세요",
+    "subjectKey": "mailer_subjects_magic_link",
+    "contentKey": "mailer_templates_magic_link_content",
+    "requiredPlaceholders": ["{{ .ConfirmationURL }}"]
+  },
+  {
+    "id": "email_change",
+    "file": "email_change.html",
+    "subject": "[Halli Galli] 이메일 변경을 확인해 주세요",
+    "subjectKey": "mailer_subjects_email_change",
+    "contentKey": "mailer_templates_email_change_content",
+    "requiredPlaceholders": ["{{ .ConfirmationURL }}"]
+  },
+  {
+    "id": "reauthentication",
+    "file": "reauthentication.html",
+    "subject": "[Halli Galli] 본인 확인 코드입니다",
+    "subjectKey": "mailer_subjects_reauthentication",
+    "contentKey": "mailer_templates_reauthentication_content",
+    "requiredPlaceholders": ["{{ .Token }}"]
+  }
+]

@@ -1,5 +1,5 @@
 import { Ban, BellRing, Check, Clock3, Gamepad2, LoaderCircle, Search, UserCheck, UserMinus, UserPlus, UsersRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import {
@@ -17,11 +17,13 @@ import {
   type FriendProfile,
   type FriendSearchResult,
 } from '../lib/friends'
-import { subscribeToOnlineUsers } from '../lib/matchmaking'
+import { subscribeToOnlineUsers, type PresenceConnectionState } from '../lib/matchmaking'
 import { getGameInviteContext, inviteErrorMessage, sendGameInvite, type GameInviteContext } from '../lib/invites'
 import { disablePushNotifications, enablePushNotifications, getPushNotificationStatus } from '../lib/push'
+import { getErrorMessage } from '../lib/errorMessage'
 
 const EMPTY_OVERVIEW: FriendOverview = { friends: [], received: [], sent: [], blocked: [] }
+type PushState = 'loading' | 'unsupported' | 'disabled' | 'enabled' | 'error'
 
 function avatarClass(seed: string) {
   const value = [...seed].reduce((sum, character) => sum + character.charCodeAt(0), 0)
@@ -51,6 +53,7 @@ export default function Friends() {
   const [tab, setTab] = useState<'friends' | 'requests'>('friends')
   const [overview, setOverview] = useState<FriendOverview>(EMPTY_OVERVIEW)
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set())
+  const [presenceState, setPresenceState] = useState<PresenceConnectionState>('connecting')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<FriendSearchResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,36 +62,75 @@ export default function Friends() {
   const [confirmKey, setConfirmKey] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [overviewError, setOverviewError] = useState('')
   const [inviteContext, setInviteContext] = useState<GameInviteContext>({ available: false })
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null)
+  const [inviteContextError, setInviteContextError] = useState('')
+  const [pushState, setPushState] = useState<PushState>('loading')
+  const [pushBusy, setPushBusy] = useState(false)
+  const overviewPromiseRef = useRef<Promise<FriendOverview> | null>(null)
+  const inviteContextPromiseRef = useRef<Promise<GameInviteContext> | null>(null)
+  const pushStatusPromiseRef = useRef<ReturnType<typeof getPushNotificationStatus> | null>(null)
+  const searchVersionRef = useRef(0)
 
-  const loadOverview = useCallback(async () => {
+  const requestOverview = useCallback(() => {
+    if (!overviewPromiseRef.current) {
+      overviewPromiseRef.current = getFriendsOverview().finally(() => { overviewPromiseRef.current = null })
+    }
+    return overviewPromiseRef.current
+  }, [])
+
+  const loadOverview = useCallback(async (ensureFresh = false) => {
+    if (ensureFresh && overviewPromiseRef.current) await overviewPromiseRef.current.catch(() => undefined)
     try {
-      setOverview(await getFriendsOverview())
-      setError('')
+      setOverview(await requestOverview())
+      setOverviewError('')
     } catch (cause) {
-      setError(friendErrorMessage(cause))
+      setOverviewError(friendErrorMessage(cause))
     } finally {
       setLoading(false)
     }
+  }, [requestOverview])
+
+  const loadInviteContext = useCallback(async () => {
+    if (!inviteContextPromiseRef.current) {
+      inviteContextPromiseRef.current = getGameInviteContext().finally(() => { inviteContextPromiseRef.current = null })
+    }
+    try {
+      setInviteContext(await inviteContextPromiseRef.current)
+      setInviteContextError('')
+    } catch {
+      setInviteContext({ available: false })
+      setInviteContextError('게임 초대 가능 여부를 확인하지 못했어요.')
+    }
+  }, [])
+
+  const loadPushState = useCallback(async () => {
+    setPushState('loading')
+    if (!pushStatusPromiseRef.current) {
+      pushStatusPromiseRef.current = getPushNotificationStatus().finally(() => { pushStatusPromiseRef.current = null })
+    }
+    try { setPushState(await pushStatusPromiseRef.current) }
+    catch { setPushState('error') }
   }, [])
 
   useEffect(() => {
     if (!user) return
     void loadOverview()
-    void getGameInviteContext().then(setInviteContext).catch(() => setInviteContext({ available: false }))
-    void getPushNotificationStatus().then(status => setPushEnabled(status === 'enabled')).catch(() => setPushEnabled(false))
+    void loadInviteContext()
+    void loadPushState()
     const unsubscribeChanges = subscribeToFriendChanges(user.id, () => void loadOverview())
-    const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers)
+    const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers, setPresenceState)
     return () => {
       unsubscribeChanges()
       unsubscribePresence()
     }
-  }, [loadOverview, user])
+  }, [loadInviteContext, loadOverview, loadPushState, user])
 
   const refreshSearch = useCallback(async () => {
     if (query.trim().length < 2) return
-    setResults(await searchFriendUsers(query))
+    const version = ++searchVersionRef.current
+    const next = await searchFriendUsers(query)
+    if (searchVersionRef.current === version) setResults(next)
   }, [query])
 
   const runAction = async (key: string, action: () => Promise<unknown>, success: string) => {
@@ -99,7 +141,7 @@ export default function Friends() {
       await action()
       setMessage(success)
       setConfirmKey('')
-      await loadOverview()
+      await loadOverview(true)
       await refreshSearch()
     } catch (cause) {
       setError(friendErrorMessage(cause))
@@ -113,30 +155,46 @@ export default function Friends() {
     setMessage('')
     setError('')
     if (query.trim().length < 2) {
+      searchVersionRef.current += 1
       setResults([])
       setError('닉네임 또는 친구 태그를 2자 이상 입력해 주세요.')
       return
     }
+    const version = ++searchVersionRef.current
+    const searchQuery = query.trim()
     setSearching(true)
     try {
-      setResults(await searchFriendUsers(query))
+      const next = await searchFriendUsers(searchQuery)
+      if (searchVersionRef.current === version) setResults(next)
     } catch (cause) {
-      setResults([])
-      setError(friendErrorMessage(cause))
+      if (searchVersionRef.current === version) {
+        setResults([])
+        setError(friendErrorMessage(cause))
+      }
     } finally {
-      setSearching(false)
+      if (searchVersionRef.current === version) setSearching(false)
     }
+  }
+
+  const changeQuery = (value: string) => {
+    searchVersionRef.current += 1
+    setQuery(value)
+    setResults([])
+    setSearching(false)
   }
 
   const requestCount = overview.received.length + overview.sent.length
   const onlineFriendCount = overview.friends.filter(friend => onlineUsers.has(friend.userId)).length
   const togglePush = async () => {
-    if (!user) return
+    if (!user || pushBusy || pushState === 'loading' || pushState === 'unsupported') return
+    if (pushState === 'error') { await loadPushState(); return }
+    setPushBusy(true)
     setError(''); setMessage('')
     try {
-      if (pushEnabled) { await disablePushNotifications(); setPushEnabled(false); setMessage('초대 알림을 껐어요.') }
-      else { await enablePushNotifications(); setPushEnabled(true); setMessage('초대 알림을 켰어요.') }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '알림 설정을 변경하지 못했어요.') }
+      if (pushState === 'enabled') { await disablePushNotifications(); setPushState('disabled'); setMessage('초대 알림을 껐어요.') }
+      else { await enablePushNotifications(); setPushState('enabled'); setMessage('초대 알림을 켰어요.') }
+    } catch (cause) { setError(getErrorMessage(cause, '알림 설정을 변경하지 못했어요.')) }
+    finally { setPushBusy(false) }
   }
 
   const inviteFriend = async (friend: FriendProfile) => {
@@ -158,15 +216,18 @@ export default function Friends() {
         <form className="search-field" onSubmit={handleSearch} role="search">
           <Search aria-hidden="true" />
           <label className="sr-only" htmlFor="friend-search">친구 닉네임 또는 태그</label>
-          <input id="friend-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="닉네임 또는 태그 검색" autoComplete="off" />
+          <input id="friend-search" value={query} onChange={event => changeQuery(event.target.value)} placeholder="닉네임 또는 태그 검색" autoComplete="off" />
           <button type="submit" aria-label="친구 검색" disabled={searching}>{searching ? <LoaderCircle className="is-spinning" /> : <UserPlus />}</button>
         </form>
-        <button className={`push-enable ${pushEnabled ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushEnabled === null}>
-          <BellRing /> {pushEnabled === null ? '알림 확인 중' : pushEnabled ? '초대 알림 끄기' : '초대 알림 켜기'}
+        <button className={`push-enable ${pushState === 'enabled' ? 'is-enabled' : ''}`} onClick={() => void togglePush()} disabled={pushBusy || pushState === 'loading' || pushState === 'unsupported'}>
+          <BellRing /> {pushBusy ? '알림 변경 중' : pushState === 'loading' ? '알림 확인 중' : pushState === 'unsupported' ? '이 브라우저는 알림 미지원' : pushState === 'error' ? '알림 상태 다시 확인' : pushState === 'enabled' ? '초대 알림 끄기' : '초대 알림 켜기'}
         </button>
       </div>
 
       {(message || error) && <p className={`friends-notice ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
+      {overviewError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{overviewError}</span><button onClick={() => void loadOverview()}>다시 불러오기</button></div>}
+      {inviteContextError && <div className="friends-notice friends-retry-notice is-error" role="alert"><span>{inviteContextError}</span><button onClick={() => void loadInviteContext()}>초대 상태 다시 확인</button></div>}
+      {presenceState === 'error' && <p className="friends-notice is-error" role="status">친구의 온라인 상태를 확인하지 못했어요. 연결되면 자동으로 다시 표시합니다.</p>}
 
       {query.trim().length > 0 && (
         <section className="friends-list search-results" aria-labelledby="search-results-title">

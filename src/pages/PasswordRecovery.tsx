@@ -1,24 +1,36 @@
 import { ArrowRight, AtSign, KeyRound, Phone, ShieldCheck } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { translateAuthError } from '../lib/authErrors'
 import { supabase } from '../lib/supabase'
 import { phoneAuthEnabled } from '../lib/environment'
+import { clearRecoveryRequestReceipt, recoveryRequestIsCoolingDown, saveRecoveryRequestReceipt } from '../lib/recoveryRequest'
 
 export default function PasswordRecovery() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const recoveryState = location.state as { identifier?: unknown } | null
   const [method, setMethod] = useState<'email' | 'phone'>('email')
   const [step, setStep] = useState<'request' | 'verify' | 'password'>('request')
-  const recoveryHint = window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).get('type') === 'recovery' || new URLSearchParams(window.location.search).has('error_code')
+  const query = new URLSearchParams(window.location.search)
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const hasRecoveryToken = hash.get('type') === 'recovery' && Boolean(hash.get('access_token'))
+  const hasRecoveryCode = query.get('type') === 'recovery' && Boolean(query.get('code'))
+  const recoveryHint = hasRecoveryToken || hasRecoveryCode || query.get('type') === 'recovery' || query.has('error_code')
   const [recoveryLinkState, setRecoveryLinkState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>(recoveryHint ? 'checking' : 'idle')
-  const [identifier, setIdentifier] = useState('')
+  const [identifier, setIdentifier] = useState(() => typeof recoveryState?.identifier === 'string' ? recoveryState.identifier : '')
   const [otp, setOtp] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const redirectTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (!supabase) { if (recoveryHint) setRecoveryLinkState('invalid'); return }
@@ -29,11 +41,11 @@ export default function PasswordRecovery() {
     const acceptRecovery = () => { completed = true; setRecoveryLinkState('valid'); setStep('password') }
     const { data } = supabase.auth.onAuthStateChange(event => { if (event === 'PASSWORD_RECOVERY') acceptRecovery() })
     void supabase.auth.getSession().then(({ data: session }) => {
-      if (session.session && recoveryHint) acceptRecovery()
+      if (session.session && (hasRecoveryToken || hasRecoveryCode)) acceptRecovery()
       else if (recoveryHint) invalidTimer = window.setTimeout(() => { if (!completed) setRecoveryLinkState('invalid') }, 1800)
     })
     return () => { data.subscription.unsubscribe(); window.clearTimeout(invalidTimer) }
-  }, [recoveryHint])
+  }, [hasRecoveryCode, hasRecoveryToken, recoveryHint])
 
   const requestRecovery = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setMessage('')
@@ -41,14 +53,13 @@ export default function PasswordRecovery() {
       if (!supabase) throw new Error('Supabase가 설정되지 않았습니다.')
       if (method === 'email') {
         const email = identifier.trim().toLowerCase()
-        const requestedAt = Number(sessionStorage.getItem('halli-galli:recovery-requested-at') ?? 0)
-        if (Date.now() - requestedAt < 60_000) {
+        if (recoveryRequestIsCoolingDown(email)) {
           navigate('/recover/sent', { replace: true, state: { method: 'email', identifier: email } })
           return
         }
         const { error: requestError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/recover?type=recovery` })
         if (requestError) throw requestError
-        sessionStorage.setItem('halli-galli:recovery-requested-at', String(Date.now()))
+        saveRecoveryRequestReceipt(email)
         navigate('/recover/sent', {
           replace: true,
           state: { method: 'email', identifier: email },
@@ -82,9 +93,10 @@ export default function PasswordRecovery() {
       const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) throw updateError
       await supabase.auth.signOut()
-      sessionStorage.removeItem('halli-galli:recovery-requested-at')
+      clearRecoveryRequestReceipt()
       setMessage('비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.')
-      window.setTimeout(() => navigate('/auth', { replace: true }), 900)
+      if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+      redirectTimerRef.current = window.setTimeout(() => { redirectTimerRef.current = null; navigate('/auth', { replace: true }) }, 900)
     } catch (cause) { setError(translateAuthError(cause, '비밀번호를 변경하지 못했어요.')) }
     finally { setBusy(false) }
   }
@@ -95,10 +107,10 @@ export default function PasswordRecovery() {
 
   return <div className="content-page narrow-page auth-page play-flow-page"><PageHeader eyebrow="ACCOUNT RECOVERY" title="계정에 다시 접속해요." description={phoneAuthEnabled ? '가입한 이메일 또는 전화번호로 본인 확인을 진행합니다.' : '가입한 이메일로 본인 확인을 진행합니다.'} />
     <form className="form-card auth-card" onSubmit={step === 'request' ? requestRecovery : step === 'verify' ? verifyPhone : savePassword}>
-      {step === 'request' && <>{phoneAuthEnabled && <div className="auth-tabs"><button type="button" className={method === 'email' ? 'is-active' : ''} onClick={() => { setMethod('email'); setIdentifier(''); setError('') }}>이메일</button><button type="button" className={method === 'phone' ? 'is-active' : ''} onClick={() => { setMethod('phone'); setIdentifier(''); setError('') }}>전화번호</button></div>}<label><span>{method === 'email' ? <AtSign /> : <Phone />}{method === 'email' ? '이메일' : '전화번호'}</span><input type={method === 'email' ? 'email' : 'tel'} value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder={method === 'email' ? 'player@example.com' : '+82 10 1234 5678'} required /></label></>}
-      {step === 'verify' && <label><span><ShieldCheck /> SMS 인증번호</span><input inputMode="numeric" value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6자리" minLength={6} maxLength={6} required /></label>}
-      {step === 'password' && <><label><span><KeyRound /> 새 비밀번호</span><input type="password" value={password} onChange={event => setPassword(event.target.value)} minLength={8} placeholder="8자 이상" required /></label><label><span><KeyRound /> 새 비밀번호 확인</span><input type="password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} placeholder="한 번 더 입력" required /></label></>}
-      {message && <p className="field-message field-message--success" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}
+      {step === 'request' && <>{phoneAuthEnabled && <div className="auth-tabs"><button type="button" className={method === 'email' ? 'is-active' : ''} onClick={() => { setMethod('email'); setIdentifier(''); setError('') }}>이메일</button><button type="button" className={method === 'phone' ? 'is-active' : ''} onClick={() => { setMethod('phone'); setIdentifier(''); setError('') }}>전화번호</button></div>}<label><span>{method === 'email' ? <AtSign /> : <Phone />}{method === 'email' ? '이메일' : '전화번호'}</span><input type={method === 'email' ? 'email' : 'tel'} value={identifier} onChange={event => { setIdentifier(event.target.value); setError('') }} placeholder={method === 'email' ? 'player@example.com' : '+82 10 1234 5678'} aria-invalid={Boolean(error)} aria-describedby={error ? 'recovery-form-error' : undefined} required /></label></>}
+      {step === 'verify' && <label><span><ShieldCheck /> SMS 인증번호</span><input inputMode="numeric" value={otp} onChange={event => { setOtp(event.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }} placeholder="6자리" minLength={6} maxLength={6} aria-invalid={Boolean(error)} aria-describedby={error ? 'recovery-form-error' : undefined} required /></label>}
+      {step === 'password' && <><label><span><KeyRound /> 새 비밀번호</span><input type="password" value={password} onChange={event => { setPassword(event.target.value); setError('') }} minLength={8} placeholder="8자 이상" aria-invalid={Boolean(error)} aria-describedby={error ? 'recovery-form-error' : undefined} required /></label><label><span><KeyRound /> 새 비밀번호 확인</span><input type="password" value={passwordConfirm} onChange={event => { setPasswordConfirm(event.target.value); setError('') }} minLength={8} placeholder="한 번 더 입력" aria-invalid={Boolean(error)} aria-describedby={error ? 'recovery-form-error' : undefined} required /></label></>}
+      {message && <p className="field-message field-message--success" role="status">{message}</p>}{error && <p id="recovery-form-error" className="form-error" role="alert">{error}</p>}
       <button className="primary-button full-button" disabled={busy}>{busy ? '처리 중...' : step === 'request' ? '복구 안내 받기' : step === 'verify' ? '인증번호 확인' : '새 비밀번호 저장'} <ArrowRight /></button>
       <button type="button" className="method-switch" onClick={() => navigate('/auth')}>로그인으로 돌아가기</button>
     </form></div>

@@ -103,8 +103,18 @@ if (racingReveals.filter(result => !result.error).length !== 1 || racingReveals.
 game = await loadGame(gameId)
 if (game.version !== 2) throw new Error(`경쟁 공개 후 version 오류: ${game.version}`)
 
-const cards = await admin.from('game_cards').select('id').eq('game_id', gameId).order('id')
+const revealedCards = await admin.from('game_cards').select('id,fruit,fruit_count').eq('game_id', gameId).eq('zone', 'face_up').order('pile_order')
+if (revealedCards.error || revealedCards.data.length !== 2 || new Set(revealedCards.data.map(card => card.id)).size !== 2) {
+  throw revealedCards.error ?? new Error('온라인 카드 공개 시 고유 ID 이동 검증 실패')
+}
+
+const cards = await admin.from('game_cards').select('id,fruit,fruit_count').eq('game_id', gameId).order('id')
 if (cards.error || cards.data.length !== 56) throw cards.error ?? new Error('테스트 덱 조회 실패')
+if (new Set(cards.data.map(card => card.id)).size !== 56) throw new Error('온라인 덱 카드 ID 중복')
+for (const fruit of ['strawberry', 'banana', 'lime', 'plum']) {
+  const copies = [1, 2, 3, 4, 5].map(count => cards.data.filter(card => card.fruit === fruit && card.fruit_count === count).length)
+  if (copies.join(',') !== '5,3,3,2,1') throw new Error(`${fruit} 온라인 기본 덱 구성 오류: ${copies.join(',')}`)
+}
 
 // Two clients race for the same exact-five bell window. The row lock and
 // round-version marker must accept exactly one request.

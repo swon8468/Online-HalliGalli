@@ -83,17 +83,29 @@ if ((await rpc(clients[1], 'get_game_invite_context')).available) throw new Erro
 const direct = await clients[0].from('game_invites').insert({ sender_id: userIds[0], receiver_id: userIds[1], room_id: roomId })
 if (!direct.error) throw new Error('game_invites 직접 insert가 허용됨')
 
-let resolveEvent, resolveSubscription
-const eventReceived = new Promise(resolve => { resolveEvent = resolve })
-const subscribed = new Promise(resolve => { resolveSubscription = resolve })
+let resolveEvent, rejectEvent, resolveSubscription, rejectSubscription
+const eventReceived = new Promise((resolve, reject) => { resolveEvent = resolve; rejectEvent = reject })
+const subscribed = new Promise((resolve, reject) => { resolveSubscription = resolve; rejectSubscription = reject })
 const channel = clients[1].channel(`invite-test:${crypto.randomUUID()}`)
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'game_invites', filter: `receiver_id=eq.${userIds[1]}` }, payload => resolveEvent(payload))
-  .subscribe(status => { if (status === 'SUBSCRIBED') resolveSubscription(status) })
-const timeout = label => new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 시간 초과`)), 30_000))
-await Promise.race([subscribed, timeout('초대 Realtime 구독')])
+  .subscribe(status => {
+    if (status === 'SUBSCRIBED') resolveSubscription(status)
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      const error = new Error(`초대 Realtime 채널 상태: ${status}`)
+      rejectSubscription(error); rejectEvent(error)
+    }
+  })
+const withTimeout = (promise, label, timeoutMs = 30_000) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`${label} 시간 초과`)), timeoutMs)
+  promise.then(
+    value => { clearTimeout(timer); resolve(value) },
+    error => { clearTimeout(timer); reject(error) },
+  )
+})
+await withTimeout(subscribed, '초대 Realtime 구독')
 await new Promise(resolve => setTimeout(resolve, 750))
 const first = await rpc(clients[0], 'send_game_invite', { p_receiver_id: userIds[1], p_room_id: roomId })
-await Promise.race([eventReceived, timeout('초대 Realtime 수신')])
+await withTimeout(eventReceived, '초대 Realtime 수신')
 await clients[1].removeChannel(channel)
 await expectError(rpc(clients[0], 'send_game_invite', { p_receiver_id: userIds[1], p_room_id: roomId }), 'already_invited')
 const [sentOverview, receivedOverview] = await Promise.all([rpc(clients[0], 'get_game_invites'), rpc(clients[1], 'get_game_invites')])
@@ -137,5 +149,6 @@ await rpc(clients[0], 'start_room_game', { p_room_id: roomId })
 await expectError(rpc(clients[1], 'respond_game_invite', { p_invite_id: beforeStart.id, p_accept: true }), 'room_not_invitable')
 
 await cleanup()
+await Promise.all(clients.map(client => client.removeAllChannels()))
 console.log('verified invite context, realtime delivery, duplicate prevention, cancel, decline, accept-and-join, expiry, and started-room rejection')
 console.log('direct invite writes are denied; server validates friendship, room state, capacity, active sessions, and rate limits')

@@ -1,0 +1,152 @@
+import { expect, test } from '@playwright/test'
+import { accounts, connectedEnvironment } from './fixture'
+
+async function login(page: import('@playwright/test').Page) {
+  const { password } = await connectedEnvironment()
+  await page.goto('/auth')
+  await page.getByLabel('이메일').fill(accounts[0].email)
+  await page.getByLabel('비밀번호').fill(password)
+  await page.locator('form').getByRole('button', { name: '로그인', exact: true }).last().click()
+  await expect(page).toHaveURL('/')
+}
+
+test('스페이스 목록 조회 실패를 같은 화면에서 다시 시도한다', async ({ page }) => {
+  await login(page)
+  let blocked = true
+  let requests = 0
+  await page.route('**/rest/v1/space_members?*', async route => {
+    requests += 1
+    return blocked ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'spaces request rejected' }) }) : route.continue()
+  })
+  await page.goto('/spaces')
+  await expect(page.getByRole('alert')).toContainText('스페이스를 불러오지 못했어요.')
+  expect(requests).toBeGreaterThanOrEqual(1)
+  blocked = false
+  await page.getByRole('button', { name: '스페이스 다시 불러오기' }).click()
+  await expect(page.getByRole('heading', { name: '내 스페이스' })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('같은 스페이스 화면에서 변경된 가입 링크를 반영하고 가입 오류에는 목록 재시도를 노출하지 않는다', async ({ page }) => {
+  await login(page)
+  await page.goto('/spaces?code=A1B2C3D4')
+  const input = page.getByLabel('스페이스 가입 코드')
+  await expect(input).toHaveValue('A1B2C3D4')
+
+  await page.evaluate(() => {
+    history.pushState({}, '', '/spaces?code=FFEEDDCC')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(input).toHaveValue('FFEEDDCC')
+
+  await page.route('**/rest/v1/rpc/join_space', route => route.fulfill({
+    status: 400,
+    contentType: 'application/json',
+    body: JSON.stringify({ message: 'invalid_join_code' }),
+  }))
+  await page.getByRole('button', { name: '가입하기' }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(page.getByRole('button', { name: '스페이스 다시 불러오기' })).toHaveCount(0)
+})
+
+test('이전 가입 코드의 늦은 오류가 새 초대 링크 입력을 덮어쓰지 않는다', async ({ page }) => {
+  await login(page)
+  let joinStarted = false
+  await page.route('**/rest/v1/rpc/join_space_by_code', async route => {
+    joinStarted = true
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'invalid_join_code' }) })
+  })
+
+  await page.goto('/spaces?code=A1B2C3D4')
+  const input = page.getByLabel('스페이스 가입 코드')
+  await expect(input).toHaveValue('A1B2C3D4')
+  await page.getByRole('button', { name: '가입하기' }).click()
+  await expect.poll(() => joinStarted).toBe(true)
+
+  await page.evaluate(() => {
+    history.pushState({}, '', '/spaces?code=FFEEDDCC')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(input).toHaveValue('FFEEDDCC')
+  await page.waitForTimeout(1_300)
+  await expect(input).toHaveValue('FFEEDDCC')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '가입하기' })).toBeEnabled()
+})
+
+test('카드 세트 목록 조회 실패를 같은 화면에서 다시 시도한다', async ({ page }) => {
+  await login(page)
+  let blocked = true
+  let requests = 0
+  await page.route('**/rest/v1/card_sets?*', async route => {
+    requests += 1
+    return blocked ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'cards request rejected' }) }) : route.continue()
+  })
+  await page.goto('/cards')
+  await expect(page.getByRole('alert')).toContainText('카드 세트를 불러오지 못했어요.')
+  expect(requests).toBeGreaterThanOrEqual(1)
+  blocked = false
+  await page.getByRole('button', { name: '카드 세트 다시 불러오기' }).click()
+  await expect(page.getByText('사용 가능한 카드 라이브러리')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('늦은 이전 스페이스 카드 응답이 새 스페이스 목록을 덮어쓰지 않는다', async ({ page }) => {
+  await login(page)
+  const firstSpace = '00000000-0000-4000-8000-000000000011'
+  const secondSpace = '00000000-0000-4000-8000-000000000022'
+  let firstStarted = false
+  const row = (id: string, name: string, spaceId: string) => ({
+    id, name, description: null, status: 'draft', version: 1, is_platform_default: false,
+    space_id: spaceId, back_asset_path: null, back_design: {}, updated_at: new Date().toISOString(), spaces: null,
+  })
+  await page.route('**/rest/v1/card_sets?*', async route => {
+    const filter = new URL(route.request().url()).searchParams.get('or') ?? ''
+    if (filter.includes(firstSpace)) {
+      firstStarted = true
+      await new Promise(resolve => setTimeout(resolve, 1_200))
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([row('00000000-0000-4000-8000-000000000111', '이전 스페이스 카드', firstSpace)]) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([row('00000000-0000-4000-8000-000000000222', '최신 스페이스 카드', secondSpace)]) })
+  })
+
+  await page.goto(`/cards?space=${firstSpace}`)
+  await expect.poll(() => firstStarted).toBe(true)
+  await page.evaluate(spaceId => {
+    history.pushState({}, '', `/cards?space=${spaceId}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, secondSpace)
+  await expect(page.getByText('최신 스페이스 카드')).toBeVisible()
+  await page.waitForTimeout(1_300)
+  await expect(page.getByText('최신 스페이스 카드')).toBeVisible()
+  await expect(page.getByText('이전 스페이스 카드')).toHaveCount(0)
+})
+
+test('이전 카드 라이브러리의 늦은 생성 완료가 새 스페이스 필터에 섞이지 않는다', async ({ page }) => {
+  await login(page)
+  const destinationSpace = '00000000-0000-4000-8000-000000000033'
+  let createStarted = false
+
+  await page.goto('/cards')
+  await page.getByRole('button', { name: '새 카드 세트' }).click()
+  await page.getByLabel('이름').fill('E2E 이전 범위 카드')
+  await page.route('**/rest/v1/rpc/create_card_set', async route => {
+    createStarted = true
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    await route.continue()
+  })
+  await page.getByRole('dialog').getByRole('button', { name: '생성', exact: true }).click()
+  await expect.poll(() => createStarted).toBe(true)
+
+  await page.evaluate(spaceId => {
+    history.pushState({}, '', `/cards?space=${spaceId}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, destinationSpace)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByText('스페이스 카드 라이브러리')).toBeVisible()
+  await page.waitForTimeout(1_300)
+  await expect(page.getByText('초안 카드 세트를 만들었어요.')).toHaveCount(0)
+  await expect(page.getByText('E2E 이전 범위 카드')).toHaveCount(0)
+  await expect(page).toHaveURL(`/cards?space=${destinationSpace}`)
+})

@@ -2,10 +2,17 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createClient } from '@supabase/supabase-js'
 
-export const accounts = [
-  { email: 'e2e-browser-host@swonport.kr', nickname: 'E2E방장', role: 'super_admin' },
-  { email: 'e2e-browser-guest@swonport.kr', nickname: 'E2E참가자', role: 'player' },
-]
+const e2eEnvironment = process.env.E2E_ENVIRONMENT === 'production' ? 'production' : 'development'
+
+export const accounts = e2eEnvironment === 'production'
+  ? [
+      { email: 'e2e-browser-prod-host@swonport.kr', nickname: '운영E2E방장', role: 'super_admin' },
+      { email: 'e2e-browser-prod-guest@swonport.kr', nickname: '운영E2E참가자', role: 'player' },
+    ]
+  : [
+      { email: 'e2e-browser-host@swonport.kr', nickname: 'E2E방장', role: 'super_admin' },
+      { email: 'e2e-browser-guest@swonport.kr', nickname: 'E2E참가자', role: 'player' },
+    ]
 
 function parseEnv(source: string) {
   return Object.fromEntries(source.split(/\r?\n/).flatMap(line => {
@@ -15,19 +22,34 @@ function parseEnv(source: string) {
 }
 
 export async function connectedEnvironment() {
-  const fileEnv = parseEnv(await readFile('.env.development', 'utf8'))
+  const fileEnv = parseEnv(await readFile(`.env.${e2eEnvironment}`, 'utf8'))
   const url = process.env.TEST_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL
   const anon = process.env.TEST_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY
   const accessToken = process.env.SUPABASE_ACCESS_TOKEN || fileEnv.SUPABASE_ACCESS_TOKEN
-  if (!url || !anon || !accessToken) throw new Error('연결형 E2E에는 개발 Supabase URL, anon key, access token이 필요합니다.')
+  if (!url || !anon || !accessToken) throw new Error(`연결형 E2E에는 ${e2eEnvironment} Supabase URL, anon key, access token이 필요합니다.`)
   const password = process.env.TEST_USER_PASSWORD || `Browser-${createHash('sha256').update(accessToken).digest('hex').slice(0, 18)}!`
   const projectRef = new URL(url).hostname.split('.')[0]
+  if (e2eEnvironment === 'production' && process.env.PRODUCTION_E2E_CONFIRMATION !== `production:${projectRef}`) {
+    throw new Error(`운영 E2E 확인값이 필요합니다: PRODUCTION_E2E_CONFIRMATION=production:${projectRef}`)
+  }
   const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/api-keys?reveal=true`, { headers: { Authorization: `Bearer ${accessToken}` } })
-  if (!response.ok) throw new Error(`개발 프로젝트 키 조회 실패 (${response.status})`)
+  if (!response.ok) throw new Error(`${e2eEnvironment} 프로젝트 키 조회 실패 (${response.status})`)
   const serviceKey = (await response.json()).find((key: { name?: string }) => key.name === 'service_role') as { api_key?: string; value?: string } | undefined
   const service = serviceKey?.api_key ?? serviceKey?.value
-  if (!service) throw new Error('개발 service role 키를 찾지 못했습니다.')
+  if (!service) throw new Error(`${e2eEnvironment} service role 키를 찾지 못했습니다.`)
   return { url, anon, password, admin: createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } }) }
+}
+
+export async function clearConnectedSessions() {
+  const { admin } = await connectedEnvironment()
+  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (listed.error) throw listed.error
+  const ids = listed.data.users.filter(user => accounts.some(account => account.email === user.email)).map(user => user.id)
+  if (!ids.length) return
+  const queues = await admin.from('matchmaking_queue').delete().in('user_id', ids)
+  if (queues.error) throw queues.error
+  const rooms = await admin.from('rooms').delete().in('host_id', ids)
+  if (rooms.error) throw rooms.error
 }
 
 async function deleteTestUser(admin: Awaited<ReturnType<typeof connectedEnvironment>>['admin'], userId: string) {

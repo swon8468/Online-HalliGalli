@@ -6,8 +6,8 @@ self.addEventListener('push', event => {
   }
   event.waitUntil(self.registration.showNotification(data.title ?? 'Halli Galli', {
     body: data.body ?? '새로운 알림이 도착했어요.',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     tag: data.tag ?? 'halli-galli-notification',
     data: { url: data.url ?? '/' },
   }))
