@@ -13,10 +13,12 @@ async function login(page: Page) {
 test('스페이스 생성 모달은 주요 화면 폭에서 잘리지 않고 키보드 포커스를 가둔다', async ({ page }) => {
   await login(page)
   const viewports = [
+    { width: 1920, height: 1080 },
     { width: 1440, height: 900 },
     { width: 1024, height: 800 },
     { width: 768, height: 900 },
     { width: 390, height: 844 },
+    { width: 320, height: 568 },
   ]
 
   for (const viewport of viewports) {
