@@ -21,6 +21,7 @@ export default function InviteCenter() {
   const [error, setError] = useState('')
   const userId = user?.id ?? null
   const activeUserIdRef = useRef(userId)
+  const actionErrorRef = useRef('')
   const refreshPromiseRef = useRef<{ userId: string; promise: Promise<GameInvitesOverview> } | null>(null)
   activeUserIdRef.current = userId
 
@@ -40,7 +41,7 @@ export default function InviteCenter() {
     try {
       const nextInvites = await requestInvites(userId)
       if (activeUserIdRef.current !== userId) return
-      setInvites(nextInvites); setError('')
+      setInvites(nextInvites); setError(actionErrorRef.current)
     } catch (cause) {
       if (activeUserIdRef.current === userId) setError(inviteErrorMessage(cause))
     } finally {
@@ -50,10 +51,12 @@ export default function InviteCenter() {
 
   useEffect(() => {
     if (!userId) {
+      actionErrorRef.current = ''
       setInvites(EMPTY); setOpen(false); setLoading(false); setBusyId(''); setError('')
       return
     }
     setInvites(EMPTY); setOpen(false); setError('')
+    actionErrorRef.current = ''
     void refresh()
     const unsubscribe = subscribeToGameInvites(userId, () => void refresh())
     const reconcile = () => {
@@ -76,6 +79,7 @@ export default function InviteCenter() {
   const respond = async (inviteId: string, accept: boolean) => {
     const actorUserId = userId
     if (!actorUserId) return
+    actionErrorRef.current = ''
     setBusyId(inviteId); setError('')
     try {
       const result = await respondGameInvite(inviteId, accept)
@@ -84,6 +88,7 @@ export default function InviteCenter() {
       if (accept && result.roomId) { setOpen(false); navigate(`/room/${encodeURIComponent(result.roomId)}`) }
     } catch (cause) {
       const actionError = inviteErrorMessage(cause)
+      actionErrorRef.current = actionError
       await refresh(true)
       if (activeUserIdRef.current === actorUserId) setError(actionError)
     }
@@ -93,9 +98,14 @@ export default function InviteCenter() {
   const cancel = async (inviteId: string) => {
     const actorUserId = userId
     if (!actorUserId) return
+    actionErrorRef.current = ''
     setBusyId(inviteId); setError('')
     try { await cancelGameInvite(inviteId); await refresh(true) }
-    catch (cause) { if (activeUserIdRef.current === actorUserId) setError(inviteErrorMessage(cause)) }
+    catch (cause) {
+      const actionError = inviteErrorMessage(cause)
+      actionErrorRef.current = actionError
+      if (activeUserIdRef.current === actorUserId) setError(actionError)
+    }
     finally { if (activeUserIdRef.current === actorUserId) setBusyId('') }
   }
 

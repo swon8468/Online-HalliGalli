@@ -36,6 +36,7 @@
     "auth-config:apply:production": "node scripts/configure-auth-settings.mjs production apply development",
     "audit-auth-email-recipient": "node scripts/audit-auth-email-recipient.mjs",
     "auth-email:smoke": "node scripts/send-auth-email-smoke.mjs",
+    "auth-signup:smoke": "node scripts/test-public-signup.mjs",
     "auth-templates:preview:develop": "node scripts/sync-auth-email-templates.mjs development preview",
     "auth-templates:preview:production": "node scripts/sync-auth-email-templates.mjs production preview",
     "auth-templates:apply:develop": "node scripts/sync-auth-email-templates.mjs development apply",

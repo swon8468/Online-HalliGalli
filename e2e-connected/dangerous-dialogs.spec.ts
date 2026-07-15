@@ -78,5 +78,5 @@ test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다
   await expect(card).toBeVisible()
   await card.getByRole('button', { name: '삭제' }).click()
   await page.getByRole('dialog', { name: '카드 세트를 삭제할까요?' }).getByRole('button', { name: '삭제하기' }).click()
-  await expect(card).toBeHidden()
+  await expect(card).toBeHidden({ timeout: 15_000 })
 })

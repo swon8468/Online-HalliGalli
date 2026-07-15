@@ -21,7 +21,9 @@ function parseEnv(source: string) {
   }))
 }
 
-export async function connectedEnvironment() {
+let connectedEnvironmentPromise: ReturnType<typeof loadConnectedEnvironment> | null = null
+
+async function loadConnectedEnvironment() {
   const fileEnv = parseEnv(await readFile(`.env.${e2eEnvironment}`, 'utf8'))
   const url = process.env.TEST_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL
   const anon = process.env.TEST_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY
@@ -32,12 +34,30 @@ export async function connectedEnvironment() {
   if (e2eEnvironment === 'production' && process.env.PRODUCTION_E2E_CONFIRMATION !== `production:${projectRef}`) {
     throw new Error(`운영 E2E 확인값이 필요합니다: PRODUCTION_E2E_CONFIRMATION=production:${projectRef}`)
   }
-  const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/api-keys?reveal=true`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  let response: Response | null = null
+  let lastError: unknown
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/api-keys?reveal=true`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      if (response.ok || response.status < 500) break
+      lastError = new Error(`${e2eEnvironment} 프로젝트 키 조회 실패 (${response.status})`)
+    } catch (error) { lastError = error }
+    await new Promise(resolve => setTimeout(resolve, Math.min(500 * (2 ** attempt), 4_000)))
+  }
+  if (!response) throw lastError ?? new Error(`${e2eEnvironment} 프로젝트 키 조회 실패`)
   if (!response.ok) throw new Error(`${e2eEnvironment} 프로젝트 키 조회 실패 (${response.status})`)
   const serviceKey = (await response.json()).find((key: { name?: string }) => key.name === 'service_role') as { api_key?: string; value?: string } | undefined
   const service = serviceKey?.api_key ?? serviceKey?.value
   if (!service) throw new Error(`${e2eEnvironment} service role 키를 찾지 못했습니다.`)
   return { url, anon, password, admin: createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } }) }
+}
+
+export function connectedEnvironment() {
+  connectedEnvironmentPromise ??= loadConnectedEnvironment().catch(error => {
+    connectedEnvironmentPromise = null
+    throw error
+  })
+  return connectedEnvironmentPromise
 }
 
 export async function clearConnectedSessions() {

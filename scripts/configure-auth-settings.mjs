@@ -53,9 +53,13 @@ if (smtpSourceEnvironment) {
   if (!sourceUrl || !sourceToken) throw new Error('SMTP 원본 Supabase 설정이 필요합니다.')
   const sourceRef = new URL(sourceUrl).hostname.split('.')[0]
   smtpSource = await requestConfig(`https://api.supabase.com/v1/projects/${sourceRef}/config/auth`, sourceToken)
-  const requiredSmtp = ['smtp_admin_email', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass']
+  const requiredSmtp = ['smtp_admin_email', 'smtp_host', 'smtp_port', 'smtp_user']
   if (!requiredSmtp.every(key => smtpSource[key] !== undefined && smtpSource[key] !== null && String(smtpSource[key]).length > 0)) {
-    throw new Error('SMTP 원본 환경에 복사 가능한 전체 자격증명이 없습니다.')
+    throw new Error('SMTP 원본 환경에 복사 가능한 공개 설정이 없습니다.')
+  }
+  const smtpPassword = process.env.AUTH_SMTP_PASSWORD
+  if (mode === 'apply' && !smtpPassword) {
+    throw new Error('보호된 SMTP 비밀번호는 프로젝트 설정 조회값으로 복사할 수 없습니다. AUTH_SMTP_PASSWORD에 실제 SMTP 비밀번호를 제공해 주세요.')
   }
   Object.assign(payload, {
     external_email_enabled: true,
@@ -65,7 +69,7 @@ if (smtpSourceEnvironment) {
     smtp_host: smtpSource.smtp_host,
     smtp_port: smtpSource.smtp_port,
     smtp_user: smtpSource.smtp_user,
-    smtp_pass: smtpSource.smtp_pass,
+    ...(smtpPassword ? { smtp_pass: smtpPassword } : {}),
     smtp_sender_name: smtpSource.smtp_sender_name || 'Halli Galli',
     ...(smtpSource.smtp_max_frequency ? { smtp_max_frequency: smtpSource.smtp_max_frequency } : {}),
   })
@@ -93,6 +97,10 @@ console.log(JSON.stringify({
     siteUrl: current.site_url?.replace(/\/$/, '') === publicUrl ? 'already_configured' : 'update',
     recoveryRedirect: currentRedirects.includes(recoveryRedirect) ? 'already_configured' : 'add',
     passwordMinimum: Number(current.password_min_length) >= 8 ? 'already_configured' : 'update',
-    smtp: smtpSource ? (current.smtp_host && current.smtp_admin_email ? 'replace_from_verified_source' : 'copy_from_verified_source') : 'unchanged',
+    smtp: smtpSource
+      ? (process.env.AUTH_SMTP_PASSWORD
+          ? (current.smtp_host && current.smtp_admin_email ? 'replace_from_verified_source' : 'copy_from_verified_source')
+          : 'actual_password_required_for_apply')
+      : 'unchanged',
   },
 }, null, 2))
