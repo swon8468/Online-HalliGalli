@@ -110,13 +110,18 @@ const penaltyActor = penaltyView.players[0]
 const penaltyRecipients = penaltyView.players.slice(1)
 const actorCards = await admin.from('game_cards').select('id').eq('game_id', penaltyFixture.gameId).eq('holder_id', penaltyActor.user_id).eq('zone', 'draw').order('pile_order')
 if (actorCards.error) throw actorCards.error
-const moveSurplus = await admin.from('game_cards').update({ holder_id: penaltyRecipients[0].user_id }).in('id', actorCards.data.slice(2).map(card => card.id))
+const penaltyRecipientPile = await admin.from('game_cards').select('pile_order').eq('game_id', penaltyFixture.gameId).eq('holder_id', penaltyRecipients[0].user_id).eq('zone', 'draw').order('pile_order', { ascending: false }).limit(1).maybeSingle()
+if (penaltyRecipientPile.error) throw penaltyRecipientPile.error
+for (const [index, card] of actorCards.data.slice(2).entries()) {
+  const moved = await admin.from('game_cards').update({ holder_id: penaltyRecipients[0].user_id, pile_order: (penaltyRecipientPile.data?.pile_order ?? 0) + index + 1 }).eq('id', card.id)
+  if (moved.error) throw moved.error
+}
 const setActorCount = await admin.from('game_players').update({ card_count: 2 }).eq('game_id', penaltyFixture.gameId).eq('user_id', penaltyActor.user_id)
 const setPenaltyState = await admin.from('games').update({
   current_turn: penaltyActor.user_id,
   state: { ...penaltyView.game.state, bellActive: false, table: [], fruitTotals: { strawberry: 0, banana: 0, lime: 0, plum: 0 } },
 }).eq('id', penaltyFixture.gameId)
-if (moveSurplus.error || setActorCount.error || setPenaltyState.error) throw moveSurplus.error ?? setActorCount.error ?? setPenaltyState.error
+if (setActorCount.error || setPenaltyState.error) throw setActorCount.error ?? setPenaltyState.error
 const penaltyCardsBefore = await admin.from('game_cards').select('holder_id').eq('game_id', penaltyFixture.gameId).eq('zone', 'draw')
 if (penaltyCardsBefore.error) throw penaltyCardsBefore.error
 const penaltyCountsBefore = new Map(penaltyCardsBefore.data.map(card => card.holder_id).map((holderId, _, cards) => [
@@ -146,10 +151,15 @@ const middle = skipView.players[2]
 const afterMiddle = skipView.players[3]
 const middleCards = await admin.from('game_cards').select('id').eq('game_id', skipFixture.gameId).eq('holder_id', middle.user_id)
 if (middleCards.error) throw middleCards.error
-const moveMiddle = await admin.from('game_cards').update({ holder_id: afterMiddle.user_id }).in('id', middleCards.data.map(card => card.id))
+const afterMiddlePile = await admin.from('game_cards').select('pile_order').eq('game_id', skipFixture.gameId).eq('holder_id', afterMiddle.user_id).eq('zone', 'draw').order('pile_order', { ascending: false }).limit(1).maybeSingle()
+if (afterMiddlePile.error) throw afterMiddlePile.error
+for (const [index, card] of middleCards.data.entries()) {
+  const moved = await admin.from('game_cards').update({ holder_id: afterMiddle.user_id, zone: 'draw', pile_order: (afterMiddlePile.data?.pile_order ?? 0) + index + 1 }).eq('id', card.id)
+  if (moved.error) throw moved.error
+}
 const eliminateMiddle = await admin.from('game_players').update({ card_count: 0, eliminated_at: new Date().toISOString() }).eq('game_id', skipFixture.gameId).eq('user_id', middle.user_id)
 const forceBeforeMiddle = await admin.from('games').update({ current_turn: beforeMiddle.user_id }).eq('id', skipFixture.gameId)
-if (moveMiddle.error || eliminateMiddle.error || forceBeforeMiddle.error) throw moveMiddle.error ?? eliminateMiddle.error ?? forceBeforeMiddle.error
+if (eliminateMiddle.error || forceBeforeMiddle.error) throw eliminateMiddle.error ?? forceBeforeMiddle.error
 await rpc(clientById.get(beforeMiddle.user_id), 'reveal_game_card', { p_game_id: skipFixture.gameId, p_action_id: randomUUID() })
 skipView = await loadGame(skipFixture.gameId)
 if (skipView.game.current_turn !== afterMiddle.user_id) throw new Error('6인 중간 탈락 플레이어 턴 건너뛰기 실패')

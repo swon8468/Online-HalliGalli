@@ -7,11 +7,18 @@ import { createPracticeGame, decideBotBell, getPracticeTableCards, getPracticeTo
 import { loadGameSettings, playGameSound, saveGameSettings, vibrateGame, type GameSettings } from '../game/settings'
 import { useSessionHeartbeat } from '../hooks/useSessionHeartbeat'
 import { getErrorMessage } from '../lib/errorMessage'
+import { createUuid } from '../lib/id'
 import { abandonGame, findMyActiveSession, loadGameView, requestGameRematch, returnFinishedGameToRoom, revealGameCard, ringGameBell, subscribeToGame, type GameCardTheme, type GamePlayerInfo, type GameSnapshot, type GameTableCard } from '../lib/rooms'
 
 const emptyState: GameSnapshot = {
   phase: 'playing', round: 1, version: 0, currentTurn: '', table: [],
   fruitTotals: { strawberry: 0, banana: 0, lime: 0, plum: 0 }, bellActive: false, winnerId: null,
+}
+
+function recordGameFailure(category: 'game_reveal_failed' | 'game_ring_failed', gameId: string, actionId: string) {
+  void import('../lib/diagnostics').then(({ recordClientDiagnostic }) => recordClientDiagnostic(category, {
+    severity: 'error', gameId, actionId,
+  }), () => undefined)
 }
 
 function gameErrorMessage(caught: unknown) {
@@ -32,13 +39,39 @@ function toTableCard(owner: PracticeActor, card: PracticeCard | null): GameTable
   return card ? { cardId: card.id, userId: owner, fruit: card.fruit, count: card.count } : null
 }
 
+const fruitNames: Record<GameTableCard['fruit'], string> = {
+  strawberry: '딸기', banana: '바나나', lime: '라임', plum: '자두',
+}
+
+function stableCardVariant(cardId?: string): CSSProperties {
+  if (!cardId) return {}
+  let hash = 2166136261
+  for (const character of cardId) {
+    hash ^= character.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  const variants = [
+    { x: '-1.5%', y: '1%', rotate: '-1.1deg', scale: '.99' },
+    { x: '0%', y: '-1%', rotate: '.7deg', scale: '1.01' },
+    { x: '1.5%', y: '.5%', rotate: '1.15deg', scale: '1' },
+  ]
+  const variant = variants[Math.abs(hash) % variants.length]
+  return {
+    '--card-detail-x': variant.x,
+    '--card-detail-y': variant.y,
+    '--card-detail-rotate': variant.rotate,
+    '--card-detail-scale': variant.scale,
+  } as CSSProperties
+}
+
 function FaceCard({ card, owner, theme, isMine = false, eliminated = false }: { card?: GameTableCard | null; owner: string; theme?: GameCardTheme | null; isMine?: boolean; eliminated?: boolean }) {
-  const className = `arena-face-card ${card ? '' : 'is-empty'} ${isMine ? 'is-mine' : ''} ${eliminated ? 'is-eliminated' : ''}`.trim()
   const design = card ? theme?.designs.find(item => item.fruit === card.fruit && item.count === card.count) : null
+  const hasCustomImage = Boolean(design?.assetUrl)
+  const className = `arena-face-card ${card ? '' : 'is-empty'} ${isMine ? 'is-mine' : ''} ${eliminated ? 'is-eliminated' : ''} ${card && !hasCustomImage ? 'has-card-variant' : ''}`.trim()
   const [assetFailed, setAssetFailed] = useState(false)
   useEffect(() => { setAssetFailed(false) }, [design?.assetUrl])
   return card
-    ? <div className={className} data-card-id={card.cardId} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111' }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt={`${design.label || card.fruit} ${card.count}개`} onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" />}<small>{owner}의 공개 카드</small></div>
+    ? <div className={className} data-card-id={card.cardId} aria-label={`${owner}의 공개 카드, ${design?.label || fruitNames[card.fruit]} ${card.count}개`} style={{ background: design?.style.background ?? '#ffffff', color: design?.style.accent ?? '#111111', ...(!hasCustomImage ? stableCardVariant(card.cardId) : {}) }}>{design?.assetUrl && !assetFailed ? <img className="custom-card-face-image" src={design.assetUrl} alt="" aria-hidden="true" decoding="async" onError={() => setAssetFailed(true)} /> : <Fruit kind={card.fruit} count={card.count} size="large" decorative />}<small>{owner}의 공개 카드</small></div>
     : <div className={className}><span>{eliminated ? '탈락' : '공개 카드'}</span><small>{owner}</small></div>
 }
 
@@ -91,6 +124,8 @@ export default function Game() {
   const botActionVersionRef = useRef<number | null>(null)
   const forcedBotRingUsedRef = useRef(false)
   const practiceBusyRef = useRef(false)
+  const gameActionBusyRef = useRef(false)
+  const pendingActionIdsRef = useRef<Partial<Record<'reveal' | 'ring', { gameId: string; actionId: string }>>>({})
   const resultFxRef = useRef('')
   const impactTimerRef = useRef<number | null>(null)
   practiceRef.current = practice
@@ -117,6 +152,25 @@ export default function Game() {
 
   useEffect(() => { saveGameSettings(settings) }, [settings])
 
+  useEffect(() => {
+    if (!theme || document.visibilityState !== 'visible') return
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+    if (connection?.saveData || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g') return
+    const preload = () => {
+      for (const source of new Set(theme.designs.flatMap(design => design.assetUrl ? [design.assetUrl] : []))) {
+        const image = new Image()
+        image.decoding = 'async'
+        image.src = source
+      }
+    }
+    if ('requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(preload, { timeout: 2_000 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+    const timer = setTimeout(preload, 500)
+    return () => clearTimeout(timer)
+  }, [theme])
+
   const commitPractice = useCallback((next: PracticeGameState) => {
     practiceRef.current = next
     setPractice(next)
@@ -130,6 +184,23 @@ export default function Game() {
   const endPracticeAction = useCallback(() => {
     practiceBusyRef.current = false
     setBusy(false)
+  }, [])
+  const beginGameAction = useCallback(() => {
+    if (gameActionBusyRef.current) return false
+    gameActionBusyRef.current = true
+    setBusy(true)
+    return true
+  }, [])
+  const endGameAction = useCallback((actionGameId: string) => {
+    gameActionBusyRef.current = false
+    if (activeGameIdRef.current === actionGameId) setBusy(false)
+  }, [])
+  const pendingActionId = useCallback((kind: 'reveal' | 'ring', actionGameId: string) => {
+    const pending = pendingActionIdsRef.current[kind]
+    if (pending?.gameId === actionGameId) return pending.actionId
+    const actionId = createUuid()
+    pendingActionIdsRef.current[kind] = { gameId: actionGameId, actionId }
+    return actionId
   }, [])
 
   const requestGameView = useCallback(() => {
@@ -233,6 +304,8 @@ export default function Game() {
       setMotion(null)
       versionRef.current = null
       tableRef.current = []
+      gameActionBusyRef.current = false
+      pendingActionIdsRef.current = {}
     }
     setSessionLookupState('idle')
     void refresh()
@@ -365,9 +438,9 @@ export default function Game() {
 
   const reveal = async () => {
     setFeedback(null)
-    playGameSound('card', settings)
     if (isBotMode) {
       if (practice.phase !== 'playing' || practice.turn !== 'player' || playerCount <= 0 || !beginPracticeAction()) return
+      playGameSound('card', settings)
       await animateCards('play-player', 460)
       const next = revealPracticeCard(practiceRef.current, 'player')
       commitPractice(next)
@@ -375,26 +448,31 @@ export default function Game() {
       endPracticeAction()
       return
     }
-    if (!gameId) return
+    if (!gameId || !myTurn || myCount <= 0 || !connection.online || !connection.serverConnected || !beginGameAction()) return
     const actionGameId = gameId
-    setBusy(true)
+    const actionId = pendingActionId('reveal', actionGameId)
+    playGameSound('card', settings)
     try {
-      await animateCards('play-player', 460)
-      const nextState = await revealGameCard(actionGameId)
+      const nextState = await revealGameCard(actionGameId, actionId)
+      delete pendingActionIdsRef.current.reveal
       if (activeGameIdRef.current !== actionGameId) return
-      setState(nextState)
+      setState(current => nextState.version >= current.version ? nextState : current)
+      await animateCards('play-player', 460)
       await refresh(true)
     }
-    catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
-    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
+    catch (caught) {
+      recordGameFailure('game_reveal_failed', actionGameId, actionId)
+      if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught))
+    }
+    finally { endGameAction(actionGameId) }
   }
 
   const ring = async () => {
     setFeedback(null)
-    playGameSound('bell', settings)
-    vibrateGame(35, settings)
     if (isBotMode) {
       if (practice.phase !== 'playing' || practice.bellLocked || getPracticeTableCards(practice).length === 0 || !beginPracticeAction()) return
+      playGameSound('bell', settings)
+      vibrateGame(35, settings)
       const correct = practiceIsExactFive(practice)
       setFeedback(correct ? 'success' : 'error')
       if (correct) {
@@ -418,11 +496,14 @@ export default function Game() {
       endPracticeAction()
       return
     }
-    if (!gameId) return
+    if (!gameId || state.phase === 'finished' || me?.eliminated || bellLocked || state.table.length === 0 || !connection.online || !connection.serverConnected || !beginGameAction()) return
     const actionGameId = gameId
-    setBusy(true)
+    const actionId = pendingActionId('ring', actionGameId)
+    playGameSound('bell', settings)
+    vibrateGame(35, settings)
     try {
-      const result = await ringGameBell(actionGameId)
+      const result = await ringGameBell(actionGameId, actionId)
+      delete pendingActionIdsRef.current.ring
       if (activeGameIdRef.current !== actionGameId) return
       if (!result.accepted) setMessage(result.reason === 'already_rung' ? '이번 카드에서는 이미 종이 울렸어요.' : '종을 울릴 수 없어요.')
       else {
@@ -430,8 +511,11 @@ export default function Game() {
         vibrateGame(result.correct ? [45, 35, 70] : 140, settings)
       }
       await refresh(true)
-    } catch (caught) { if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught)) }
-    finally { if (activeGameIdRef.current === actionGameId) setBusy(false) }
+    } catch (caught) {
+      recordGameFailure('game_ring_failed', actionGameId, actionId)
+      if (activeGameIdRef.current === actionGameId) setMessage(gameErrorMessage(caught))
+    }
+    finally { endGameAction(actionGameId) }
   }
 
   const exitGame = async () => {
@@ -539,14 +623,14 @@ export default function Game() {
             <div className={`table-face-grid table-face-grid--${tableSeats.length}`} aria-label="공개 카드 영역">
               {tableSeats.map(seat => <FaceCard card={seat.card} owner={seat.nickname} theme={isBotMode ? null : theme} isMine={seat.isMine} eliminated={seat.eliminated} key={`${seat.id}-${seat.card?.cardId ?? 'empty'}`} />)}
             </div>
-            <button className="arena-bell" onClick={() => void ring()} disabled={busy || me?.eliminated || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || bellLocked || (isBotMode ? getPracticeTableCards(practice).length === 0 : state.table.length === 0)} aria-label="종 울리기"><span /><Bell /><strong>{bellLocked ? '다음 카드까지 대기' : '종 울리기'}</strong></button>
+            <button className="arena-bell" onClick={() => void ring()} disabled={busy || me?.eliminated || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || bellLocked || (isBotMode ? getPracticeTableCards(practice).length === 0 : state.table.length === 0)} aria-label="종 울리기" aria-busy={busy}><span /><Bell /><strong>{busy ? '판정 중' : bellLocked ? '다음 카드까지 대기' : '종 울리기'}</strong></button>
           </div>
           <div className={`arena-message ${feedback ? `is-${feedback}` : ''}`} aria-live="polite">{!isBotMode && state.phase === 'finished' && winner ? `${winner.nickname} 승리 · ` : ''}{message}</div>
         </section>
 
         <section className={`arena-station player-station ${myTurn ? 'is-turn' : ''} ${me?.eliminated ? 'is-eliminated' : ''}`} aria-label="내 플레이 영역">
           <div className="station-profile"><span className="avatar avatar--4">나<i className={!isBotMode && (!connection.online || !connection.serverConnected) ? 'is-offline' : 'is-online'} /></span><span><strong>{isBotMode ? '나' : me?.nickname ?? '플레이어'}</strong><small>{me?.eliminated ? '이번 게임에서 탈락' : !isBotMode && (!connection.online || !connection.serverConnected) ? '연결 복구 중' : myTurn ? '카드를 뒤집으세요' : isBotMode ? '봇 차례를 기다리는 중' : `${turnPlayer?.nickname ?? '상대'} 차례를 기다리는 중`}</small></span><b>{myCount}장</b></div>
-          <div className="station-play player-play"><button className="player-deck" style={cardBackStyle} onClick={() => void reveal()} disabled={!myTurn || busy || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || myCount === 0}><i /><i /><strong>{myCount}</strong><small>{myTurn ? '눌러서 뒤집기' : '상대 차례'}</small></button></div>
+          <div className="station-play player-play"><button className="player-deck" style={cardBackStyle} onClick={() => void reveal()} disabled={!myTurn || busy || (!isBotMode && (!connection.online || !connection.serverConnected)) || (isBotMode ? practice.phase : state.phase) === 'finished' || myCount === 0} aria-busy={busy}><i /><i /><strong>{myCount}</strong><small>{busy ? '처리 중' : myTurn ? '눌러서 뒤집기' : '상대 차례'}</small></button></div>
         </section>
         {motion && <div className={`card-motion-layer ${motion.kind}`} aria-hidden="true">{motion.kind.startsWith('play-') ? <div className="motion-card-back" style={cardBackStyle}><i /></div> : motion.kind.startsWith('penalty-') ? Array.from({ length: motion.count ?? 1 }, (_, index) => {
           const count = motion.count ?? 1

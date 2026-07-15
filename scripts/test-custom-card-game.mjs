@@ -68,9 +68,17 @@ const room = await rpc(host, 'create_space_room', { p_space_id: space.id, p_max_
 await rpc(player, 'join_private_room', { p_code: room.code })
 await rpc(player, 'set_room_ready', { p_room_id: room.id, p_ready: true })
 const gameId = await rpc(host, 'start_room_game', { p_room_id: room.id })
-const gameV1 = await admin.from('games').select('card_set_id,card_set_version,card_set_snapshot').eq('id', gameId).single()
-const cardsV1 = await admin.from('game_cards').select('id', { count: 'exact', head: true }).eq('game_id', gameId)
+const gameV1 = await admin.from('games').select('card_set_id,card_set_version,card_set_snapshot,shuffle_metadata').eq('id', gameId).single()
+const cardsV1 = await admin.from('game_cards').select('id,holder_id,pile_order,fruit,fruit_count', { count: 'exact' }).eq('game_id', gameId)
 if (gameV1.error || gameV1.data.card_set_id !== cardSet.id || gameV1.data.card_set_version !== 1 || cardsV1.count !== 58) throw gameV1.error ?? new Error('커스텀 v1 덱 생성 실패')
+if (gameV1.data.shuffle_metadata?.policy !== 'constrained-rounds-v1' || gameV1.data.shuffle_metadata?.usedFallback !== false) throw new Error('커스텀 덱이 공용 제한 셔플 정책을 사용하지 않았습니다.')
+if (new Set(cardsV1.data.map(card => card.id)).size !== 58) throw new Error('커스텀 덱 물리 cardId 중복')
+for (const holderId of new Set(cardsV1.data.map(card => card.holder_id))) {
+  const pile = cardsV1.data.filter(card => card.holder_id === holderId).sort((left, right) => left.pile_order - right.pile_order)
+  for (let index = 1; index < pile.length; index += 1) {
+    if (pile[index - 1].fruit === pile[index].fruit && pile[index - 1].fruit_count === pile[index].fruit_count) throw new Error('커스텀 덱 연속 동일 앞면 제한 실패')
+  }
+}
 const v1Design = gameV1.data.card_set_snapshot.designs.find(item => item.fruit_type === 'strawberry' && item.fruit_count === 1)
 if (v1Design?.label !== '버전1 딸기' || v1Design?.front_asset_path !== `${cardSet.id}/missing-v1.png`) throw new Error('게임 카드 디자인 스냅샷 실패')
 

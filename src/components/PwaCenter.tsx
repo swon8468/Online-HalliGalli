@@ -1,5 +1,6 @@
 import { Download, RefreshCw, Share, Wifi, WifiOff, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -13,6 +14,7 @@ declare global {
 }
 
 export default function PwaCenter() {
+  const location = useLocation()
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [online, setOnline] = useState(() => navigator.onLine)
   const [restored, setRestored] = useState(false)
@@ -91,7 +93,7 @@ export default function PwaCenter() {
     {offlineReady && <aside className="pwa-toast" role="status"><Download /> 오프라인 실행 준비가 완료됐어요.</aside>}
     {installStatus && <aside className="pwa-toast" role="status"><Download /> {installStatus}<button aria-label="설치 상태 닫기" onClick={() => setInstallStatus('')}><X /></button></aside>}
     {updateReady && <aside className="pwa-update-banner" role="status"><RefreshCw /><span><strong>새 버전이 준비됐어요.</strong><small>{updateError || '안전하게 새로고침해 업데이트합니다.'}</small></span><button onClick={() => void applyUpdate()}>{updateError ? '다시 시도' : '지금 업데이트'}</button></aside>}
-    {!standalone && !installDismissed && (installPrompt || ios) && <aside className="pwa-install-banner"><Download /><span><strong>앱으로 설치하기</strong><small>{ios ? 'Safari 공유 메뉴에서 홈 화면에 추가할 수 있어요.' : '홈 화면에서 더 빠르게 실행하세요.'}</small></span><button onClick={() => void install()}>설치 안내</button><button aria-label="설치 안내 닫기" onClick={dismissInstall}><X /></button></aside>}
+    {location.pathname === '/' && !standalone && !installDismissed && (installPrompt || ios) && <aside className="pwa-install-banner"><Download /><span><strong>앱으로 설치하기</strong><small>{ios ? 'Safari 공유 메뉴에서 홈 화면에 추가할 수 있어요.' : '홈 화면에서 더 빠르게 실행하세요.'}</small></span><button onClick={() => void install()}>설치 안내</button><button aria-label="설치 안내 닫기" onClick={dismissInstall}><X /></button></aside>}
     {iosHelp && <section className="pwa-ios-overlay" role="dialog" aria-modal="true" aria-labelledby="ios-install-title"><div><button data-dialog-dismiss aria-label="iOS 설치 안내 닫기" onClick={() => setIosHelp(false)}><X /></button><Share /><h2 id="ios-install-title">iPhone·iPad에 설치하기</h2><ol><li>Safari 아래의 <strong>공유</strong> 버튼을 누르세요.</li><li><strong>홈 화면에 추가</strong>를 선택하세요.</li><li>오른쪽 위의 <strong>추가</strong>를 누르세요.</li></ol><button className="primary-button full-button" onClick={() => setIosHelp(false)}>확인했어요</button></div></section>}
   </>
 }

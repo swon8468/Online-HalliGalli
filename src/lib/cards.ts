@@ -107,9 +107,9 @@ export async function saveCardDesign(design: CardDesignRecord) {
   if (error) throw new Error(translate(error))
 }
 
-const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'])
+const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/svg+xml'])
 export async function uploadCardAsset(cardSetId: string, file: File, kind: string) {
-  if (!allowedTypes.has(file.type)) throw new Error('PNG, JPEG, WebP, SVG 이미지만 업로드할 수 있습니다.')
+  if (!allowedTypes.has(file.type)) throw new Error('PNG, JPEG, WebP, AVIF, SVG 이미지만 업로드할 수 있습니다.')
   if (file.size > 2 * 1024 * 1024) throw new Error('이미지는 2MB 이하여야 합니다.')
   const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
   const path = `${cardSetId}/${kind}-${createUuid()}.${extension}`

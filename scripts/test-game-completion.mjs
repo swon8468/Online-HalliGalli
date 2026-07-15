@@ -74,21 +74,103 @@ const createGame = async () => {
 }
 
 const loadGame = async gameId => {
-  const result = await admin.from('games').select('state,current_turn,version,finished_at').eq('id', gameId).single()
+  const result = await admin.from('games').select('state,current_turn,version,finished_at,shuffle_metadata').eq('id', gameId).single()
   if (result.error) throw result.error
   return result.data
 }
 
 const { room, gameId } = await createGame()
+console.log('[card-integrity] game created')
 let game = await loadGame(gameId)
+console.log('[card-integrity] game metadata loaded')
+if (game.shuffle_metadata?.policy !== 'constrained-rounds-v1' || game.shuffle_metadata?.usedFallback !== false) {
+  throw new Error(`서버 제한 셔플 메타데이터 오류: ${JSON.stringify(game.shuffle_metadata)}`)
+}
+const initialCards = await admin.from('game_cards')
+  .select('id,holder_id,pile_order,fruit,fruit_count,reveal_generation')
+  .eq('game_id', gameId)
+  .order('pile_order')
+console.log('[card-integrity] initial deck loaded')
+if (initialCards.error || initialCards.data.length !== 56) throw initialCards.error ?? new Error('초기 물리 덱 조회 실패')
+if (new Set(initialCards.data.map(card => card.id)).size !== 56) throw new Error('초기 물리 cardId 중복')
+for (const holderId of [user1Id, user2Id]) {
+  const pile = initialCards.data.filter(card => card.holder_id === holderId).sort((left, right) => left.pile_order - right.pile_order)
+  for (let index = 1; index < pile.length; index += 1) {
+    if (pile[index - 1].fruit === pile[index].fruit && pile[index - 1].fruit_count === pile[index].fruit_count) {
+      throw new Error(`서버 셔플 연속 동일 앞면: holder=${holderId} order=${pile[index].pile_order}`)
+    }
+  }
+}
+const rounds = new Map()
+for (const card of initialCards.data) {
+  const faces = rounds.get(card.pile_order) ?? []
+  faces.push(`${card.fruit}:${card.fruit_count}`)
+  rounds.set(card.pile_order, faces)
+}
+const recentRoundKeys = []
+for (const [, faces] of [...rounds].sort(([left], [right]) => left - right)) {
+  const key = faces.sort().join('|')
+  if (recentRoundKeys.slice(-4).includes(key)) throw new Error(`서버 2인 최근 4라운드 조합 반복: ${key}`)
+  recentRoundKeys.push(key)
+}
 const turnClient = game.current_turn === user1Id ? user1 : user2
 const actionId = randomUUID()
 const firstReveal = await turnClient.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: actionId })
 if (firstReveal.error) throw firstReveal.error
+console.log('[card-integrity] first reveal completed')
+const firstCardId = firstReveal.data?.table?.[0]?.cardId
+if (!firstCardId) throw new Error('공개 스냅샷에 cardId가 없습니다.')
 const duplicateReveal = await turnClient.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: actionId })
 if (duplicateReveal.error) throw duplicateReveal.error
 game = await loadGame(gameId)
 if (game.version !== 1) throw new Error(`멱등 공개 실패: version=${game.version}`)
+const firstRevealEvents = await admin.from('game_events')
+  .select('action_id,payload')
+  .eq('game_id', gameId)
+  .eq('event_type', 'reveal')
+  .eq('action_id', actionId)
+if (firstRevealEvents.error || firstRevealEvents.data.length !== 1
+  || firstRevealEvents.data[0].payload.cardId !== firstCardId
+  || firstRevealEvents.data[0].payload.revealGeneration !== 1) {
+  throw firstRevealEvents.error ?? new Error('cardId/actionId/공개 세대 이벤트 불변 조건 실패')
+}
+const diagnosticRequestId = randomUUID()
+const clientDiagnostic = await turnClient.rpc('record_client_diagnostic', {
+  p_environment: 'development',
+  p_severity: 'error',
+  p_category: 'game_reveal_failed',
+  p_request_id: diagnosticRequestId,
+  p_game_id: gameId,
+  p_action_id: actionId,
+  p_card_id: firstCardId,
+  p_reconnect_count: 1,
+  p_pwa_version: 'integration',
+  p_app_build_version: 'integration',
+  p_browser_family: 'chromium',
+  p_os_family: 'macos',
+})
+if (clientDiagnostic.error || !clientDiagnostic.data) throw clientDiagnostic.error ?? new Error('클라이언트 진단 기록 실패')
+const diagnosticTrace = await admin.from('client_diagnostics').select('request_id,game_id,action_id,card_id,reconnect_count,environment,category').eq('id', clientDiagnostic.data).single()
+if (diagnosticTrace.error
+  || diagnosticTrace.data.request_id !== diagnosticRequestId
+  || diagnosticTrace.data.game_id !== gameId
+  || diagnosticTrace.data.action_id !== actionId
+  || diagnosticTrace.data.card_id !== firstCardId
+  || diagnosticTrace.data.reconnect_count !== 1
+  || diagnosticTrace.data.environment !== 'development'
+  || diagnosticTrace.data.category !== 'game_reveal_failed') {
+  throw diagnosticTrace.error ?? new Error('PII 제한 진단 추적 필드 검증 실패')
+}
+const rejectedDuplicateEvent = await admin.from('game_events').insert({
+  game_id: gameId,
+  user_id: null,
+  event_type: 'reveal',
+  action_id: randomUUID(),
+  payload: { cardId: firstCardId, revealGeneration: 1, fruit: 'strawberry', count: 1 },
+})
+if (!rejectedDuplicateEvent.error || !rejectedDuplicateEvent.error.message.includes('duplicate_card_reveal')) {
+  throw new Error('동일 cardId 공개 세대의 복제 이벤트가 서버에서 차단되지 않았습니다.')
+}
 
 // Even with different action IDs, two near-simultaneous requests from the
 // current player may advance the turn only once.
@@ -131,6 +213,36 @@ const acceptedRings = simultaneous.filter(result => result.data?.accepted && res
 const rejectedRings = simultaneous.filter(result => result.data?.accepted === false && result.data?.reason === 'already_rung')
 if (acceptedRings.length !== 1 || rejectedRings.length !== 1) throw new Error('동시 종 서버 단일 승자 판정 실패')
 
+const winningIndex = simultaneous.findIndex(result => result.data?.accepted && result.data?.correct)
+const winningUserId = winningIndex === 0 ? user1Id : user2Id
+const winningClient = winningIndex === 0 ? user1 : user2
+const collectedCard = await admin.from('game_cards').select('holder_id,zone,reveal_generation').eq('id', firstCardId).single()
+if (collectedCard.error || collectedCard.data.holder_id !== winningUserId || collectedCard.data.zone !== 'draw' || collectedCard.data.reveal_generation !== 1) {
+  throw collectedCard.error ?? new Error('종 회수 후 물리 카드 lifecycle 검증 실패')
+}
+const prepareLegalReveal = await admin.from('game_cards').update({ pile_order: -1 }).eq('id', firstCardId)
+const forceLegalTurn = await admin.from('games').update({ current_turn: winningUserId }).eq('id', gameId)
+if (prepareLegalReveal.error || forceLegalTurn.error) throw prepareLegalReveal.error ?? forceLegalTurn.error
+const legalReveal = await winningClient.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: randomUUID() })
+if (legalReveal.error || !legalReveal.data.table.some(card => card.cardId === firstCardId)) {
+  throw legalReveal.error ?? new Error('종 회수 뒤 동일 물리 카드의 정상 재공개 실패')
+}
+const legalRevealEvent = await admin.from('game_events').select('payload')
+  .eq('game_id', gameId)
+  .eq('event_type', 'reveal')
+  .contains('payload', { cardId: firstCardId, revealGeneration: 2 })
+if (legalRevealEvent.error || legalRevealEvent.data.length !== 1) throw legalRevealEvent.error ?? new Error('정상 재공개 세대 증가 실패')
+const transitionTrace = await admin.from('game_card_transitions')
+  .select('from_zone,to_zone,reveal_generation')
+  .eq('game_id', gameId)
+  .eq('card_id', firstCardId)
+  .order('id')
+if (transitionTrace.error
+  || !transitionTrace.data.some(row => row.from_zone === 'face_up' && row.to_zone === 'draw')
+  || transitionTrace.data.filter(row => row.from_zone === 'draw' && row.to_zone === 'face_up').length < 2) {
+  throw transitionTrace.error ?? new Error('cardId zone 이동 진단 로그 실패')
+}
+
 // A repeated wrong-ring action ID must charge the penalty only once.
 const wrongWindow = await admin.from('games').update({ state: { phase: 'playing', bellActive: false }, version: 4 }).eq('id', gameId)
 if (wrongWindow.error) throw wrongWindow.error
@@ -144,8 +256,10 @@ if (wrongStats.error || wrongStats.data.wrong_rings !== 1) throw wrongStats.erro
 
 // Force a deterministic last-card boundary with service-role test setup:
 // one player owns exactly one drawable card and the other owns the remaining 55.
-const resetCards = await admin.from('game_cards').update({ holder_id: user2Id, zone: 'draw' }).eq('game_id', gameId)
-if (resetCards.error) throw resetCards.error
+for (const [index, cardRow] of cards.data.entries()) {
+  const resetCard = await admin.from('game_cards').update({ holder_id: user2Id, zone: 'draw', pile_order: 1000 + index }).eq('id', cardRow.id)
+  if (resetCard.error) throw resetCard.error
+}
 const lastCard = await admin.from('game_cards').update({ holder_id: user1Id, zone: 'draw', pile_order: 1 }).eq('id', cards.data[0].id)
 if (lastCard.error) throw lastCard.error
 const forceTurn = await admin.from('games').update({ current_turn: user1Id, version: 10 }).eq('id', gameId)
@@ -194,4 +308,4 @@ const restarted = await user1.rpc('start_room_game', { p_room_id: lobbyFixture.r
 if (restarted.error || !restarted.data) throw restarted.error ?? new Error('복귀한 대기방 재시작 실패')
 
 console.log(`verified game completion: room ${room.code}`)
-console.log('idempotent reveal/ring, simultaneous bell, last-card finish, ranking, rematch, lobby return, and forfeit passed')
+console.log('constrained deal, cardId/reveal-generation lifecycle, duplicate detection, PII-limited diagnostics, idempotent reveal/ring, simultaneous bell, last-card finish, ranking, rematch, lobby return, and forfeit passed')

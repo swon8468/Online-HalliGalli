@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { heartbeatGameSession, heartbeatRoomSession, markGameSessionDisconnected, markRoomSessionDisconnected } from '../lib/rooms'
 
+function recordReconnect(kind: 'room' | 'game', id: string, reconnectCount: number) {
+  void import('../lib/diagnostics').then(({ recordClientDiagnostic }) => recordClientDiagnostic('realtime_reconnected', {
+    gameId: kind === 'game' ? id : null,
+    roomId: kind === 'room' ? id : null,
+    reconnectCount,
+  }), () => undefined)
+}
+
 export function useSessionHeartbeat(kind: 'room' | 'game', id: string | null | undefined, onReconnect?: () => void) {
   const [online, setOnline] = useState(() => navigator.onLine)
   const [serverConnected, setServerConnected] = useState(true)
   const reconnectRef = useRef(onReconnect)
+  const reconnectCountRef = useRef(0)
+  const disconnectedRef = useRef(false)
   reconnectRef.current = onReconnect
 
   useEffect(() => {
@@ -17,10 +27,17 @@ export function useSessionHeartbeat(kind: 'room' | 'game', id: string | null | u
       try {
         if (kind === 'game') await heartbeatGameSession(id)
         else await heartbeatRoomSession(id)
-        if (active) { setOnline(true); setServerConnected(true) }
+        if (active) {
+          setOnline(true); setServerConnected(true)
+          if (disconnectedRef.current) {
+            disconnectedRef.current = false
+            reconnectCountRef.current += 1
+            recordReconnect(kind, id, reconnectCountRef.current)
+          }
+        }
         return true
       } catch {
-        if (active) setServerConnected(false)
+        if (active) { disconnectedRef.current = true; setServerConnected(false) }
         return false
       }
     }
@@ -36,7 +53,7 @@ export function useSessionHeartbeat(kind: 'room' | 'game', id: string | null | u
         .finally(() => { reconcilePromise = null })
     }
     const reconnect = () => { setOnline(true); reconcile() }
-    const disconnect = () => { setOnline(false); setServerConnected(false) }
+    const disconnect = () => { disconnectedRef.current = true; setOnline(false); setServerConnected(false) }
     const visible = () => { if (document.visibilityState === 'visible') reconcile() }
     const pageHide = () => {
       if (kind === 'game') void markGameSessionDisconnected(id)

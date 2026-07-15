@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const connectedPort = Number(process.env.E2E_CONNECTED_PORT ?? 43131)
+const connectedBaseUrl = `http://127.0.0.1:${connectedPort}`
+
 export default defineConfig({
   testDir: './e2e-connected',
   fullyParallel: false,
@@ -8,6 +11,6 @@ export default defineConfig({
   globalSetup: './e2e-connected/global-setup.ts',
   globalTeardown: './e2e-connected/global-teardown.ts',
   reporter: 'list',
-  use: { baseURL: 'http://127.0.0.1:43131', ...devices['Desktop Chrome'], trace: 'retain-on-failure', screenshot: 'only-on-failure' },
-  webServer: { command: 'npm run dev:connected', url: 'http://127.0.0.1:43131', reuseExistingServer: false, timeout: 120_000 },
+  use: { baseURL: connectedBaseUrl, ...devices['Desktop Chrome'], trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  webServer: { command: `npm run dev:connected -- --port ${connectedPort}`, url: connectedBaseUrl, reuseExistingServer: false, timeout: 120_000 },
 })

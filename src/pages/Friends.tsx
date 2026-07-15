@@ -71,6 +71,7 @@ export default function Friends() {
   const inviteContextPromiseRef = useRef<Promise<GameInviteContext> | null>(null)
   const pushStatusPromiseRef = useRef<ReturnType<typeof getPushNotificationStatus> | null>(null)
   const searchVersionRef = useRef(0)
+  const hasLoadedOverviewRef = useRef(false)
 
   const requestOverview = useCallback(() => {
     if (!overviewPromiseRef.current) {
@@ -83,6 +84,7 @@ export default function Friends() {
     if (ensureFresh && overviewPromiseRef.current) await overviewPromiseRef.current.catch(() => undefined)
     try {
       setOverview(await requestOverview())
+      hasLoadedOverviewRef.current = true
       setOverviewError('')
     } catch (cause) {
       setOverviewError(friendErrorMessage(cause))
@@ -90,6 +92,14 @@ export default function Friends() {
       setLoading(false)
     }
   }, [requestOverview])
+
+  const reconcileOverview = useCallback(() => {
+    // Realtime can report that replication is ready just after a failed initial
+    // read. Merge signals that arrive while that read is active, but leave a
+    // settled initial failure on the explicit retry path shown to the user.
+    if (!hasLoadedOverviewRef.current && !overviewPromiseRef.current) return
+    void loadOverview()
+  }, [loadOverview])
 
   const loadInviteContext = useCallback(async () => {
     if (!inviteContextPromiseRef.current) {
@@ -118,13 +128,13 @@ export default function Friends() {
     void loadOverview()
     void loadInviteContext()
     void loadPushState()
-    const unsubscribeChanges = subscribeToFriendChanges(user.id, () => void loadOverview())
+    const unsubscribeChanges = subscribeToFriendChanges(user.id, reconcileOverview)
     const unsubscribePresence = subscribeToOnlineUsers(user.id, setOnlineUsers, setPresenceState)
     return () => {
       unsubscribeChanges()
       unsubscribePresence()
     }
-  }, [loadInviteContext, loadOverview, loadPushState, user])
+  }, [loadInviteContext, loadOverview, loadPushState, reconcileOverview, user])
 
   const refreshSearch = useCallback(async () => {
     if (query.trim().length < 2) return

@@ -2,6 +2,8 @@ export type PracticeFruit = 'strawberry' | 'banana' | 'lime' | 'plum'
 export type PracticeActor = 'player' | 'bot'
 export type PracticeDifficulty = 'easy' | 'normal' | 'hard'
 
+import { fisherYates, shuffleAndDealCards } from './shufflePolicy.ts'
+
 export interface PracticeCard {
   id: string
   fruit: PracticeFruit
@@ -57,22 +59,17 @@ export function buildPracticeDeck(): PracticeCard[] {
 }
 
 export function shufflePracticeDeck(cards: PracticeCard[], random: () => number = Math.random): PracticeCard[] {
-  const shuffled = cards.map(card => ({ ...card }))
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const target = Math.floor(random() * (index + 1))
-    ;[shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]]
-  }
-  return shuffled
+  return fisherYates(cards.map(card => ({ ...card })), random)
 }
 
 const emptyStats = (): PracticeStats => ({ revealedCards: 0, correctRings: 0, wrongRings: 0, cardsWon: 0, cardsPaid: 0 })
 
 export function createPracticeGame(random: () => number = Math.random): PracticeGameState {
-  const deck = shufflePracticeDeck(buildPracticeDeck(), random)
+  const deal = shuffleAndDealCards(buildPracticeDeck(), 2, random)
   return {
     phase: 'playing', version: 0, turn: 'player', winner: null,
-    playerDraw: deck.filter((_, index) => index % 2 === 0),
-    botDraw: deck.filter((_, index) => index % 2 === 1),
+    playerDraw: deal.piles[0],
+    botDraw: deal.piles[1],
     playerFace: [], botFace: [], bellLocked: false,
     stats: { player: emptyStats(), bot: emptyStats() },
   }

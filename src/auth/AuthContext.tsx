@@ -27,6 +27,11 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 const DEMO_USER_KEY = 'halli-galli-demo-user'
 
+async function removeCurrentPushSubscription() {
+  const { disablePushNotifications } = await import('../lib/push')
+  await disablePushNotifications()
+}
+
 function mapUser(user: User): AppUser {
   return {
     id: user.id,
@@ -140,12 +145,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { requiresVerification: false }
     },
     signOut: async () => {
-      if (supabase) await supabase.auth.signOut()
+      if (supabase) {
+        await removeCurrentPushSubscription().catch(() => undefined)
+        await supabase.auth.signOut()
+      }
       localStorage.removeItem(DEMO_USER_KEY)
       setUser(null)
     },
     signOutAll: async () => {
-      if (supabase) await supabase.auth.signOut({ scope: 'global' })
+      if (supabase) {
+        await removeCurrentPushSubscription().catch(() => undefined)
+        await supabase.auth.signOut({ scope: 'global' })
+      }
       localStorage.removeItem(DEMO_USER_KEY)
       setUser(null)
     },

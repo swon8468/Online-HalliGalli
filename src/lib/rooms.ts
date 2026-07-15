@@ -72,7 +72,7 @@ export interface GameSnapshot {
   fruitTotals: Record<GameFruit, number>
   bellActive: boolean
   winnerId: string | null
-  lastResult?: { type: 'reveal' | 'ring'; userId: string; correct: boolean | null; fruit: GameFruit | null; count: number | null } | null
+  lastResult?: { type: 'reveal' | 'ring'; userId: string; actionId?: string | null; cardId?: string | null; correct: boolean | null; fruit: GameFruit | null; count: number | null } | null
   playerResults?: GamePlayerResult[]
   rematchRequestedCount?: number
   rematchPlayerCount?: number
@@ -310,17 +310,17 @@ export async function loadGameView(gameId: string): Promise<GameView> {
   }
 }
 
-export async function revealGameCard(gameId: string): Promise<GameSnapshot> {
+export async function revealGameCard(gameId: string, actionId = createUuid()): Promise<GameSnapshot> {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: createUuid() })
+  let { data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId, p_action_id: actionId })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('reveal_game_card', { p_game_id: gameId }))
   if (error) throw error
   return data as GameSnapshot
 }
 
-export async function ringGameBell(gameId: string) {
+export async function ringGameBell(gameId: string, actionId = createUuid()) {
   const client = requireSupabase()
-  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: createUuid() })
+  let { data, error } = await client.rpc('attempt_ring', { p_game_id: gameId, p_action_id: actionId })
   if (error?.code === 'PGRST202') ({ data, error } = await client.rpc('attempt_ring', { p_game_id: gameId }))
   if (error) throw error
   return data as { accepted: boolean; correct?: boolean; reason?: string; state: GameSnapshot }

@@ -4,12 +4,19 @@ self.addEventListener('push', event => {
     try { data = event.data.json() }
     catch { data = { body: event.data.text() } }
   }
-  event.waitUntil(self.registration.showNotification(data.title ?? 'Halli Galli', {
-    body: data.body ?? '새로운 알림이 도착했어요.',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    tag: data.tag ?? 'halli-galli-notification',
-    data: { url: data.url ?? '/' },
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+    const visibleClient = windowClients.find(client => client.visibilityState === 'visible')
+    if (visibleClient) {
+      visibleClient.postMessage({ type: 'halli-galli:push-foreground', payload: data })
+      return undefined
+    }
+    return self.registration.showNotification(data.title ?? 'Halli Galli', {
+      body: data.body ?? '새로운 알림이 도착했어요.',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: data.tag ?? 'halli-galli-notification',
+      data: { url: data.url ?? '/' },
+    })
   }))
 })
 
