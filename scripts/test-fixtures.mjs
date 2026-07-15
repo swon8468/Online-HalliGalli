@@ -34,6 +34,7 @@ const fixtureEmails = new Set([
   'space-outsider-test@swonport.kr',
   'space-subdomain-test@sub.swonport.kr',
   'space-super-test@swonport.kr',
+  'space-support-test@swonport.kr',
   'user1@swonport.kr',
   'user2@swonport.kr',
   ...Array.from({ length: 3 }, (_, index) => `friend${index + 1}@swonport.kr`),

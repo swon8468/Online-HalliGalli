@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { emailUsesInstitutionDomain, normalizeInstitutionEmailDomain } from '../src/lib/emailDomain.ts'
 
-const [migration, edge, spacesPage, spacesClient, styles] = await Promise.all([
+const [migration, foundation, edge, spacesPage, spacesClient, styles] = await Promise.all([
   readFile(new URL('../supabase/migrations/202607150001_space_email_domain_and_manager.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../supabase/migrations/202607150006_space_operations_foundation.sql', import.meta.url), 'utf8'),
   readFile(new URL('../supabase/functions/space-admin/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/pages/Spaces.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/lib/spaces.ts', import.meta.url), 'utf8'),
@@ -16,17 +17,19 @@ assert.match(migration, /space_email_domain_required/)
 assert.match(edge, /managerEmail[\s\S]*managerNickname[\s\S]*managerPassword/)
 assert.match(edge, /app_metadata: \{ platform_role: 'player' \}/)
 assert.match(edge, /role: 'manager'/)
-assert.match(edge, /emailMatchesDomain\(email, space\.allowed_email_domain\)/)
+assert.match(edge, /emailMatchesDomains\(email, space\.allowed_email_domains/)
 assert.match(edge, /const domain = value\.trim\(\)\.toLowerCase\(\)/)
 assert.doesNotMatch(edge, /replace\(\/\^@\+\//)
 assert.match(edge, /bulk_validation_failed/)
-assert.match(edge, /previousByUserId/)
 assert.match(edge, /results\.reverse\(\)/)
-assert.match(edge, /rollbackAccount/)
+assert.match(edge, /admin\.auth\.admin\.deleteUser/)
 assert.match(edge, /bulk_operation_failed/)
-assert.match(spacesPage, /기관 이메일 도메인/)
-assert.match(spacesPage, /별도 스페이스 관리자/)
-assert.match(spacesPage, /스페이스와 관리자 생성/)
+assert.match(foundation, /allowed_email_domains text\[\]/)
+assert.match(foundation, /join_code_expires_at/)
+assert.match(foundation, /space_managed_accounts/)
+assert.match(spacesPage, /허용 이메일 도메인/)
+assert.match(spacesPage, /초기 관리자/)
+assert.match(spacesPage, /스페이스 생성/)
 assert.match(spacesClient, /space_email_domain_required/)
 assert.match(styles, /\.admin-profile\{[^}]*color:#fff[^}]*background:transparent/)
 assert.match(styles, /\.admin-profile \.avatar\{[^}]*background:#0b4f91/)
