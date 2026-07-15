@@ -14,6 +14,12 @@ export const accounts = e2eEnvironment === 'production'
       { email: 'e2e-browser-guest@swonport.kr', nickname: 'E2E참가자', role: 'player' },
     ]
 
+export const spaceManagerAccount = e2eEnvironment === 'production'
+  ? { email: 'e2e-space-manager-prod@swonport.kr', nickname: '운영스페이스관리자' }
+  : { email: 'e2e-space-manager@swonport.kr', nickname: '스페이스관리자' }
+
+const fixtureEmails = new Set([...accounts.map(account => account.email), spaceManagerAccount.email])
+
 function parseEnv(source: string) {
   return Object.fromEntries(source.split(/\r?\n/).flatMap(line => {
     const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
@@ -100,7 +106,7 @@ export async function removeConnectedFixtures() {
   const { admin } = await connectedEnvironment()
   const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (listed.error) throw listed.error
-  const users = listed.data.users.filter(user => accounts.some(account => account.email === user.email))
+  const users = listed.data.users.filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
   if (users.length) {
     const ids = users.map(user => user.id)
     const spaces = await admin.from('spaces').select('id').in('created_by', ids)
@@ -137,6 +143,6 @@ export async function assertConnectedFixturesRemoved() {
   const { admin } = await connectedEnvironment()
   const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (listed.error) throw listed.error
-  const leftovers = listed.data.users.filter(user => accounts.some(account => account.email === user.email))
+  const leftovers = listed.data.users.filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
   if (leftovers.length) throw new Error(`연결형 E2E 계정 ${leftovers.length}개가 정리되지 않았습니다.`)
 }

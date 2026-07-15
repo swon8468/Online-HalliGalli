@@ -16,6 +16,9 @@ const accounts = [
   { email: 'space-manager-test@swonport.kr', nickname: '스페이스관리', platformRole: 'player' },
   { email: 'space-member-test@swonport.kr', nickname: '스페이스멤버', platformRole: 'player' },
   { email: 'space-outsider-test@swonport.kr', nickname: '외부사용자', platformRole: 'player' },
+  { email: 'space-external-test@example.com', nickname: '외부도메인', platformRole: 'player' },
+  { email: 'space-fake-domain-test@fake-swonport.kr', nickname: '유사도메인', platformRole: 'player' },
+  { email: 'space-subdomain-test@sub.swonport.kr', nickname: '하위도메인', platformRole: 'player' },
 ]
 const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
 if (listed.error) throw listed.error
@@ -31,7 +34,7 @@ for (const account of accounts) {
   if (profile.error) throw profile.error
 }
 async function clientFor(email) { const client = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } }); const signed = await client.auth.signInWithPassword({ email, password }); if (signed.error) throw signed.error; return client }
-const superClient = await clientFor(accounts[0].email), managerClient = await clientFor(accounts[1].email), memberClient = await clientFor(accounts[2].email), outsiderClient = await clientFor(accounts[3].email)
+const superClient = await clientFor(accounts[0].email), managerClient = await clientFor(accounts[1].email), memberClient = await clientFor(accounts[2].email), outsiderClient = await clientFor(accounts[3].email), externalClient = await clientFor(accounts[4].email), fakeDomainClient = await clientFor(accounts[5].email), subdomainClient = await clientFor(accounts[6].email)
 async function invoke(client, body, expectedOk = true) {
   const result = await client.functions.invoke('space-admin', { body })
   let responseBody = result.data
@@ -41,6 +44,13 @@ async function invoke(client, body, expectedOk = true) {
   return { ...result, data: responseBody }
 }
 async function rpc(client, name, args, expectedOk = true) { const result = await client.rpc(name, args); if (expectedOk && result.error) throw result.error; if (!expectedOk && !result.error) throw new Error(`${name} 요청이 잘못 허용됨`); return result }
+
+for (const invalidDomain of ['swonport.kr', '@@swonport.kr', '@swonport']) {
+  const denied = await invoke(superClient, { action: 'create_space', name: '잘못된 도메인', slug: `invalid-domain-${invalidDomain.length}-${invalidDomain.charCodeAt(0)}`, emailDomain: invalidDomain, managerEmail: 'never-created@swonport.kr', managerNickname: '생성금지', managerPassword: password, reason: '도메인 입력 검증' }, false)
+  if (denied.data?.error !== 'invalid_email_domain') throw new Error(`${invalidDomain} 형식이 차단되지 않았습니다.`)
+}
+const malformedManager = await invoke(superClient, { action: 'create_space', name: '잘못된 관리자', slug: 'invalid-manager-email', emailDomain: '@swonport.kr', managerEmail: 'manager@@swonport.kr', managerNickname: '생성금지', managerPassword: password, reason: '관리자 이메일 검증' }, false)
+if (malformedManager.data?.error !== 'manager_email_domain_mismatch') throw new Error('복수 @ 관리자 이메일이 차단되지 않았습니다.')
 
 let space = (await admin.from('spaces').select('id,slug,join_code').eq('slug', 'automation-organization').maybeSingle()).data
 if (!space) {
@@ -52,10 +62,23 @@ if (!space) {
   }
 }
 if (!space) {
-  const created = await invoke(superClient, { action: 'create_space', name: '자동화 단체', slug: 'automation-organization', description: '스페이스 자동 테스트', reason: '자동 테스트 스페이스 생성' })
+  const created = await invoke(superClient, { action: 'create_space', name: '자동화 단체', slug: 'automation-organization', description: '스페이스 자동 테스트', emailDomain: ' @SWONPORT.KR ', managerEmail: ' SPACE-CREATED-MANAGER@SWONPORT.KR ', managerNickname: '자동관리자', managerPassword: password, reason: '자동 테스트 스페이스 생성' })
+  if (created.data.manager.email !== 'space-created-manager@swonport.kr' || created.data.manager.role !== 'manager' || !created.data.manager.password) throw new Error('별도 스페이스 관리자 생성 실패')
   space = { id: created.data.space.id, slug: created.data.space.slug, join_code: null }
 }
-await admin.from('spaces').update({ name: '자동화 단체', status: 'active', join_enabled: true, archived_at: null }).eq('id', space.id)
+const createdManagers = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+if (createdManagers.error) throw createdManagers.error
+const createdManagerUser = createdManagers.data.users.find(user => user.email === 'space-created-manager@swonport.kr')
+if (!createdManagerUser) throw new Error('별도 스페이스 관리자 Auth 계정이 없습니다.')
+const initialRoles = await admin.from('space_members').select('user_id,role').eq('space_id', space.id).in('user_id', [users.get(accounts[0].email).id, createdManagerUser.id])
+if (initialRoles.error) throw initialRoles.error
+if (initialRoles.data.find(row => row.user_id === users.get(accounts[0].email).id)?.role !== 'owner' || initialRoles.data.find(row => row.user_id === createdManagerUser.id)?.role !== 'manager') throw new Error('플랫폼 관리자 owner / 별도 관리자 manager 역할 배정 실패')
+const updatedCreatedManager = await admin.auth.admin.updateUserById(createdManagerUser.id, { password, email_confirm: true })
+if (updatedCreatedManager.error) throw updatedCreatedManager.error
+const createdManagerClient = await clientFor('space-created-manager@swonport.kr')
+const createdManagerSnapshot = await invoke(createdManagerClient, { action: 'snapshot', spaceId: space.id })
+if (!createdManagerSnapshot.data.actor.canManage || createdManagerSnapshot.data.actor.spaceRole !== 'manager') throw new Error('별도 스페이스 관리자 로그인 또는 관리 권한 실패')
+await admin.from('spaces').update({ name: '자동화 단체', status: 'active', join_enabled: true, allowed_email_domain: '@swonport.kr', archived_at: null }).eq('id', space.id)
 await admin.from('space_members').delete().eq('space_id', space.id).neq('user_id', users.get(accounts[0].email).id)
 await admin.from('space_members').upsert({ space_id: space.id, user_id: users.get(accounts[0].email).id, role: 'owner', invited_by: users.get(accounts[0].email).id }, { onConflict: 'space_id,user_id' })
 
@@ -74,6 +97,14 @@ const joinCode = rotated.data.joinCode
 await admin.from('space_members').delete().eq('space_id', space.id).eq('user_id', users.get(accounts[3].email).id)
 const joined = await rpc(outsiderClient, 'join_space_by_code', { p_join_code: joinCode })
 if (joined.data.id !== space.id) throw new Error('가입 코드 가입 실패')
+const externalJoin = await rpc(externalClient, 'join_space_by_code', { p_join_code: joinCode }, false)
+if (externalJoin.error?.message !== 'space_email_domain_required') throw new Error('기관 이메일 도메인 가입 제한 실패')
+for (const client of [fakeDomainClient, subdomainClient]) {
+  const denied = await rpc(client, 'join_space_by_code', { p_join_code: joinCode }, false)
+  if (denied.error?.message !== 'space_email_domain_required') throw new Error('유사 또는 하위 도메인 가입 제한 실패')
+}
+const externalAttach = await invoke(superClient, { action: 'add_existing', spaceId: space.id, email: accounts[4].email, role: 'member', reason: '외부 도메인 차단 검증' }, false)
+if (externalAttach.data?.error !== 'space_email_domain_required') throw new Error('외부 도메인 기존 계정 연결 차단 실패')
 
 const room = await rpc(memberClient, 'create_space_room', { p_space_id: space.id, p_max_players: 3, p_card_set_id: null })
 if (!room.data?.id || room.data.space_id !== space.id) throw new Error('스페이스 전용 방 생성 실패')
@@ -82,10 +113,10 @@ if (roomRead.error || roomRead.data.length !== 1) throw roomRead.error ?? new Er
 
 let secondSpace = (await admin.from('spaces').select('id').eq('slug', 'automation-company').maybeSingle()).data
 if (!secondSpace) {
-  const created = await invoke(superClient, { action: 'create_space', name: '자동화 회사', slug: 'automation-company', description: '격리 자동 테스트', reason: '격리용 스페이스 생성' })
+  const created = await invoke(superClient, { action: 'create_space', name: '자동화 회사', slug: 'automation-company', description: '격리 자동 테스트', emailDomain: '@swonport.kr', managerEmail: 'space-company-manager@swonport.kr', managerNickname: '회사관리자', reason: '격리용 스페이스 생성' })
   secondSpace = { id: created.data.space.id }
 }
-await admin.from('spaces').update({ status: 'active', join_enabled: false, archived_at: null }).eq('id', secondSpace.id)
+await admin.from('spaces').update({ status: 'active', join_enabled: false, allowed_email_domain: '@swonport.kr', archived_at: null }).eq('id', secondSpace.id)
 await invoke(managerClient, { action: 'snapshot', spaceId: secondSpace.id }, false)
 const secondRoom = await admin.from('rooms').insert({ code: `ISO${String(Date.now()).slice(-3)}`, kind: 'private', status: 'waiting', host_id: users.get(accounts[0].email).id, max_players: 2, space_id: secondSpace.id }).select('id').single()
 if (secondRoom.error) throw secondRoom.error
@@ -95,6 +126,11 @@ await rpc(managerClient, 'join_private_room', { p_code: (await admin.from('rooms
 
 const createdAccount = await invoke(managerClient, { action: 'create_account', spaceId: space.id, email: 'space-created-test@swonport.kr', nickname: '생성멤버', role: 'member', reason: '개별 계정 생성 테스트' })
 if (!createdAccount.data.account.userId) throw new Error('개별 계정 생성 실패')
+const atomicBulk = await invoke(managerClient, { action: 'bulk_create_accounts', spaceId: space.id, accounts: [{ email: 'space-bulk-atomic@swonport.kr', nickname: '원자멤버' }, { email: 'space-bulk-external@example.com', nickname: '외부멤버' }], reason: '일괄 원자성 검증' }, false)
+if (atomicBulk.data?.error !== 'bulk_validation_failed' || atomicBulk.data?.failures?.[0]?.error !== 'space_email_domain_required') throw new Error('일괄 등록 선검증 실패')
+const afterRejectedBulk = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+if (afterRejectedBulk.error) throw afterRejectedBulk.error
+if (afterRejectedBulk.data.users.some(user => user.email === 'space-bulk-atomic@swonport.kr')) throw new Error('실패한 일괄 요청이 일부 계정을 남겼습니다.')
 const bulk = await invoke(managerClient, { action: 'bulk_create_accounts', spaceId: space.id, accounts: [{ email: 'space-bulk1@swonport.kr', nickname: '일괄멤버1', externalId: 'B-001' }, { email: 'space-bulk2@swonport.kr', nickname: '일괄멤버2', externalId: 'B-002' }], reason: 'CSV 일괄 계정 생성 테스트' })
 if (bulk.data.accounts.length !== 2 || bulk.data.failures.length) throw new Error('일괄 계정 생성 실패')
 

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { accounts, connectedEnvironment } from './fixture'
+import { accounts, connectedEnvironment, spaceManagerAccount } from './fixture'
 
 async function login(page: Page) {
   const { password } = await connectedEnvironment()
@@ -10,7 +10,7 @@ async function login(page: Page) {
   await expect(page).toHaveURL('/')
 }
 
-test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page }) => {
+test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page, browser }) => {
   await login(page)
   await page.goto('/account')
   await page.evaluate(() => {
@@ -32,14 +32,47 @@ test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다
   await page.getByRole('button', { name: '스페이스 생성', exact: true }).click()
   const createSpace = page.getByRole('dialog', { name: '스페이스 생성' })
   await expect(createSpace.getByRole('button', { name: '관리 URL 복사' })).toBeDisabled()
-  await createSpace.getByLabel('이름').fill('E2E 릴리스 단체')
+  await createSpace.getByLabel('이름', { exact: true }).fill('E2E 릴리스 단체')
   await createSpace.getByRole('textbox', { name: 'Slug', exact: true }).fill('e2e-release-space')
+  await createSpace.getByLabel('관리자 이메일').fill(spaceManagerAccount.email)
+  await createSpace.getByLabel('관리자 표시 이름').fill(spaceManagerAccount.nickname)
+  await createSpace.getByLabel('기관 이메일 도메인').fill('swonport.kr')
+  await createSpace.getByLabel('설명').fill('위험 작업 모달 자동 검증')
+  await createSpace.getByRole('button', { name: '스페이스와 관리자 생성', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('@example.org 형식')
+  await expect(createSpace).toBeVisible()
+  await createSpace.getByLabel('기관 이메일 도메인').fill('@@swonport.kr')
+  await createSpace.getByRole('button', { name: '스페이스와 관리자 생성', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('@example.org 형식')
+  await createSpace.getByLabel('기관 이메일 도메인').fill(' @SWONPORT.KR ')
+  await expect(createSpace.getByLabel('기관 이메일 도메인')).toHaveValue('@swonport.kr')
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } }))
   await createSpace.getByRole('button', { name: '관리 URL 복사' }).click()
   await expect(page.getByRole('status')).toContainText('관리 URL을 복사했어요.')
-  await createSpace.getByLabel('설명').fill('위험 작업 모달 자동 검증')
-  await createSpace.getByRole('button', { name: '생성', exact: true }).click()
+  await createSpace.getByRole('button', { name: '스페이스와 관리자 생성', exact: true }).click()
+  await expect(createSpace.getByRole('status')).toContainText('스페이스 관리자 로그인 정보')
+  const managerCredentials = createSpace.locator('.space-created-manager code')
+  await expect(managerCredentials).toHaveCount(2)
+  const managerEmail = (await managerCredentials.nth(0).textContent())?.trim() ?? ''
+  const managerPassword = (await managerCredentials.nth(1).textContent())?.trim() ?? ''
+  expect(managerEmail).toBe(spaceManagerAccount.email)
+  expect(managerPassword.length).toBeGreaterThanOrEqual(12)
+  await createSpace.getByRole('button', { name: '관리 화면 열기', exact: true }).click()
   await expect(page).toHaveURL('/spaces/e2e-release-space/admin', { timeout: 15_000 })
+
+  const managerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:43131' })
+  const managerPage = await managerContext.newPage()
+  await managerPage.goto('/auth')
+  await managerPage.getByLabel('이메일').fill(managerEmail)
+  await managerPage.getByLabel('비밀번호').fill(managerPassword)
+  await managerPage.locator('form').getByRole('button', { name: '로그인', exact: true }).last().click()
+  await expect(managerPage).toHaveURL('/')
+  await managerPage.goto('/spaces/e2e-release-space/admin')
+  await expect(managerPage.getByRole('heading', { name: 'E2E 릴리스 단체 관리' })).toBeVisible()
+  await expect(managerPage.getByText('허용 이메일: @swonport.kr')).toBeVisible()
+  await managerPage.goto('/admin')
+  await expect(managerPage.getByRole('heading', { name: '관리자 권한이 필요합니다.' })).toBeVisible()
+  await managerContext.close()
 
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => undefined } }))
   await page.getByRole('button', { name: '링크 복사' }).click()
