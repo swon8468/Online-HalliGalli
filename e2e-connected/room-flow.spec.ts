@@ -59,10 +59,12 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     expect(code).toMatch(/^[A-Z]{3}[0-9]{3}$/)
 
     let heartbeatRequests = 0
+    let heartbeatCompletions = 0
     await host.route('**/rest/v1/rpc/heartbeat_room_session', async route => {
       heartbeatRequests += 1
       await new Promise(resolve => setTimeout(resolve, 250))
       await route.continue()
+      heartbeatCompletions += 1
     })
     await host.evaluate(() => {
       window.dispatchEvent(new Event('online'))
@@ -70,16 +72,22 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
       document.dispatchEvent(new Event('visibilitychange'))
     })
     await expect.poll(() => heartbeatRequests).toBe(1)
+    await expect.poll(() => heartbeatCompletions).toBe(1)
     await host.waitForTimeout(350)
     expect(heartbeatRequests).toBe(1)
     await host.unroute('**/rest/v1/rpc/heartbeat_room_session')
 
-    await host.route('**/rest/v1/rpc/heartbeat_room_session', route => route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ message: 'temporary heartbeat failure' }),
-    }))
+    let failedHeartbeatRequests = 0
+    await host.route('**/rest/v1/rpc/heartbeat_room_session', route => {
+      failedHeartbeatRequests += 1
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'temporary heartbeat failure' }),
+      })
+    })
     await host.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect.poll(() => failedHeartbeatRequests).toBe(1)
     await expect(host.locator('.connection-banner')).toBeVisible()
     await host.unroute('**/rest/v1/rpc/heartbeat_room_session')
     await host.evaluate(() => window.dispatchEvent(new Event('online')))
@@ -122,7 +130,7 @@ test('두 브라우저가 로그인해 방 생성·코드 참여·준비·게임
     await guest.goto(`/join?code=${code}`)
     await guest.getByRole('button', { name: /방 참여하기/ }).click()
     await expect(guest).toHaveURL(/\/room\/[0-9a-f-]+$/)
-    await expect(host.getByText('E2E참가자', { exact: false })).toBeVisible()
+    await expect(host.getByText(accounts[1].nickname, { exact: false })).toBeVisible()
     await guest.getByRole('button', { name: '준비하기' }).click()
     await expect(guest.getByRole('button', { name: /준비 완료/ })).toBeVisible()
 

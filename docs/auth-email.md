@@ -25,6 +25,16 @@ Supabase Dashboard의 Authentication → Email/SMTP 설정에서 Custom SMTP를 
 
 Resend API 키는 Supabase Dashboard에만 입력합니다. 로컬 `.env`, GitHub, Vite 클라이언트 코드에는 복사하지 않습니다.
 
+운영 프로젝트에 스크립트로 같은 공개 SMTP 설정을 적용할 때는 관리 API가 반환한 `smtp_pass`를 재사용하지 않습니다. 이 값은 프로젝트별로 보호된 값이라 다른 프로젝트의 실제 SMTP 비밀번호가 아닙니다. 실제 Resend API 키는 명령 한 번에만 환경변수로 전달합니다.
+
+```sh
+AUTH_SMTP_PASSWORD='실제 Resend API 키' \
+AUTH_CONFIG_APPLY_CONFIRMATION=production:PROJECT_REF \
+npm run auth-config:apply:production
+```
+
+터미널 기록을 남기지 않으려면 Supabase Dashboard의 Authentication → Email/SMTP에서 운영 프로젝트에 직접 입력하는 방식을 사용합니다. 적용 직후에는 설정 감사만으로 끝내지 말고 외부 주소로 실제 가입 메일을 보내 SMTP 인증까지 확인합니다.
+
 ## 3. URL 설정
 
 개발 프로젝트의 Site URL은 `https://develop.haligali.swonport.kr`, 운영 프로젝트는 `https://haligali.swonport.kr`로 설정합니다. Redirect URLs에는 각각 다음 경로를 허용합니다.
@@ -61,6 +71,13 @@ AUTH_TEMPLATE_APPLY_CONFIRMATION=development:PROJECT_REF npm run auth-templates:
 5. 재설정 링크로 새 비밀번호를 저장한 뒤 새 비밀번호로 로그인합니다.
 6. 같은 주소로 빠르게 반복 요청했을 때 앱의 중복 방지와 Supabase 전송 제한 안내가 작동하는지 확인합니다.
 7. 만료된 링크와 이미 사용한 링크가 한글 오류 화면으로 연결되는지 확인합니다.
+
+운영 SMTP 자격증명과 가입 트리거를 함께 확인하려면 수신 가능한 테스트 주소로 공개 가입 스모크 테스트를 실행합니다. 생성된 임시 사용자는 성공·실패와 관계없이 정리됩니다.
+
+```sh
+AUTH_SIGNUP_SMOKE_CONFIRMATION=production:test@example.com \
+npm run auth-signup:smoke -- production test@example.com
+```
 
 ## 6. 설정 점검
 

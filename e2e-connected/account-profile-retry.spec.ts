@@ -13,7 +13,7 @@ test('계정 프로필 조회 실패는 무한 로딩 대신 재시도 상태를
   await page.route('**/rest/v1/profiles*', route => blocked
     ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'temporary account profile failure' }) })
     : route.continue())
-  await page.getByRole('link', { name: 'E2E참가자 계정 관리' }).click()
+  await page.getByRole('link', { name: `${accounts[1].nickname} 계정 관리` }).click()
   await expect(page).toHaveURL('/account')
 
   await expect(page.getByRole('button', { name: '프로필 다시 불러오기' })).toBeVisible({ timeout: 12_000 })
@@ -22,6 +22,6 @@ test('계정 프로필 조회 실패는 무한 로딩 대신 재시도 상태를
 
   blocked = false
   await page.getByRole('button', { name: '프로필 다시 불러오기' }).click()
-  await expect(page.getByLabel('닉네임')).toHaveValue('E2E참가자')
+  await expect(page.getByLabel('닉네임')).toHaveValue(accounts[1].nickname)
   await expect(page.getByRole('button', { name: '프로필 다시 불러오기' })).toHaveCount(0)
 })
