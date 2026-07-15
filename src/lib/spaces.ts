@@ -43,7 +43,7 @@ export interface SpaceCardSetView {
 
 export interface SpaceAdminSnapshot {
   actor: { id: string; platformRole: string; spaceRole: SpaceRole | null; canManage: boolean }
-  space: { id: string; name: string; slug: string; description: string | null; status: SpaceStatus; joinCode: string; joinEnabled: boolean; createdAt: string }
+  space: { id: string; name: string; slug: string; description: string | null; status: SpaceStatus; joinCode: string; joinEnabled: boolean; allowedEmailDomain: string | null; createdAt: string }
   members: SpaceMemberView[]
   rooms: SpaceRoomView[]
   games: Array<{ id: string; roomId: string; startedAt: string; finishedAt: string | null; version: number }>
@@ -69,9 +69,16 @@ const errors: Record<string, string> = {
   space_not_found: '스페이스를 찾을 수 없습니다.', space_inactive: '현재 가입할 수 없는 스페이스입니다.',
   space_join_disabled: '가입 코드 사용이 중지되어 있습니다.', invalid_space: '이름과 영문 소문자 slug를 확인해 주세요.',
   invalid_space_name: '스페이스 이름을 확인해 주세요.', invalid_space_slug: 'slug는 영문 소문자, 숫자, 하이픈만 사용할 수 있습니다.',
+  invalid_email_domain: '기관 이메일 도메인을 @example.org 형식으로 입력해 주세요.', manager_email_domain_mismatch: '스페이스 관리자 이메일은 지정한 기관 도메인을 사용해야 합니다.',
+  invalid_manager_nickname: '스페이스 관리자 표시 이름을 2~12자로 입력해 주세요.', weak_manager_password: '스페이스 관리자 임시 비밀번호는 12자 이상이어야 합니다.',
+  space_slug_exists: '이미 사용 중인 스페이스 slug입니다.', space_manager_email_exists: '이미 가입된 이메일입니다. 별도 스페이스 관리자 이메일을 입력해 주세요.',
+  space_manager_creation_failed: '스페이스 관리자 계정을 만들지 못했습니다.', space_email_domain_required: '이 스페이스는 지정된 기관 이메일 계정만 가입할 수 있습니다.',
   user_not_found: '해당 이메일 계정을 찾을 수 없습니다.', cannot_modify_owner: '스페이스 소유자는 변경하거나 삭제할 수 없습니다.',
   cannot_modify_self: '자기 자신의 역할은 직접 변경할 수 없습니다.', member_not_found: '멤버를 찾을 수 없습니다.',
   invalid_bulk_size: '한 번에 1명부터 100명까지 등록할 수 있습니다.', email_required: '이메일을 입력해 주세요.',
+  bulk_validation_failed: '일괄 등록 항목을 확인해 주세요. 잘못된 항목이 있어 아무 계정도 생성하지 않았습니다.',
+  duplicate_bulk_email: '일괄 등록 목록에 같은 이메일이 중복되어 있습니다.',
+  bulk_operation_failed: '일괄 등록을 완료하지 못해 변경 사항을 되돌렸습니다. 다시 시도해 주세요.',
 }
 
 function translate(error?: string) {
@@ -105,8 +112,8 @@ export async function joinSpace(code: string): Promise<MySpace> {
   return { id: data.id, name: data.name, slug: data.slug, role: data.role, status: 'active', description: null }
 }
 
-export async function createSpace(input: { name: string; slug: string; description: string; reason: string }) {
-  return invoke<{ space: { id: string; slug: string } }>({ action: 'create_space', ...input })
+export async function createSpace(input: { name: string; slug: string; description: string; emailDomain: string; managerEmail: string; managerNickname: string; managerPassword?: string; reason: string }) {
+  return invoke<{ space: { id: string; slug: string }; manager: { userId: string; email: string; nickname: string; role: 'manager'; password: string; created: true } }>({ action: 'create_space', ...input })
 }
 
 export async function loadSpaceAdmin(slug: string): Promise<SpaceAdminSnapshot> {
@@ -116,7 +123,7 @@ export async function loadSpaceAdmin(slug: string): Promise<SpaceAdminSnapshot> 
   const result = await invoke<{
     actor: SpaceAdminSnapshot['actor']
     data: {
-      space: { id: string; name: string; slug: string; description: string | null; status: SpaceStatus; join_code: string; join_enabled: boolean; created_at: string }
+      space: { id: string; name: string; slug: string; description: string | null; status: SpaceStatus; join_code: string; join_enabled: boolean; allowed_email_domain: string | null; created_at: string }
       members: Array<{ user_id: string; role: SpaceRole; student_or_employee_id: string | null; joined_at: string; email: string | null; phone: string | null; profiles: { nickname: string; friend_tag: string; deleted_at: string | null; suspended_until: string | null } | Array<{ nickname: string; friend_tag: string; deleted_at: string | null; suspended_until: string | null }> | null }>
       rooms: Array<{ id: string; code: string; status: string; max_players: number; created_at: string }>
       games: Array<{ id: string; room_id: string; started_at: string; finished_at: string | null; version: number }>
@@ -126,7 +133,7 @@ export async function loadSpaceAdmin(slug: string): Promise<SpaceAdminSnapshot> 
   const value = result.data
   return {
     actor: result.actor,
-    space: { id: value.space.id, name: value.space.name, slug: value.space.slug, description: value.space.description, status: value.space.status, joinCode: value.space.join_code, joinEnabled: value.space.join_enabled, createdAt: value.space.created_at },
+    space: { id: value.space.id, name: value.space.name, slug: value.space.slug, description: value.space.description, status: value.space.status, joinCode: value.space.join_code, joinEnabled: value.space.join_enabled, allowedEmailDomain: value.space.allowed_email_domain, createdAt: value.space.created_at },
     members: value.members.map(member => {
       const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles
       return { userId: member.user_id, nickname: profile?.nickname ?? '알 수 없음', friendTag: profile?.friend_tag ?? '-', email: member.email, phone: member.phone, role: member.role, externalId: member.student_or_employee_id, joinedAt: member.joined_at, suspended: Boolean(profile?.suspended_until && new Date(profile.suspended_until) > new Date()), deleted: Boolean(profile?.deleted_at) }
