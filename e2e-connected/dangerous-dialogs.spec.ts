@@ -10,7 +10,7 @@ async function login(page: Page) {
   await expect(page).toHaveURL('/')
 }
 
-test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page, browser }) => {
+test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다', async ({ page, browser, baseURL }) => {
   await login(page)
   await page.goto('/account')
   await page.evaluate(() => {
@@ -60,7 +60,7 @@ test('위험한 스페이스·카드 작업은 정식 확인 모달을 거친다
   await createSpace.getByRole('button', { name: '관리 화면 열기', exact: true }).click()
   await expect(page).toHaveURL('/spaces/e2e-release-space/admin', { timeout: 15_000 })
 
-  const managerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:43131' })
+  const managerContext = await browser.newContext({ baseURL })
   const managerPage = await managerContext.newPage()
   await managerPage.goto('/auth')
   await managerPage.getByLabel('이메일').fill(managerEmail)
