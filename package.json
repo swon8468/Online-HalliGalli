@@ -22,6 +22,8 @@
     "test-session:recovery": "node scripts/test-session-recovery.mjs",
     "test-game:multiplayer": "node scripts/test-multiplayer.mjs",
     "test-game:practice": "node --experimental-strip-types scripts/test-practice-engine.mjs",
+    "test-shuffle:diagnostics": "node --experimental-strip-types scripts/test-shuffle-diagnostics.mjs",
+    "test-shuffle:statistics": "node --experimental-strip-types scripts/test-shuffle-statistics.mjs",
     "test-matchmaking": "node scripts/test-matchmaking.mjs",
     "test-friends": "node scripts/test-friends.mjs",
     "test-invites": "node scripts/test-invites.mjs",
