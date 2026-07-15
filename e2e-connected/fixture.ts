@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createClient } from '@supabase/supabase-js'
+import type { User } from '@supabase/supabase-js'
 
 const e2eEnvironment = process.env.E2E_ENVIRONMENT === 'production' ? 'production' : 'development'
 
@@ -66,11 +67,21 @@ export function connectedEnvironment() {
   return connectedEnvironmentPromise
 }
 
+async function listAllAuthUsers(admin: Awaited<ReturnType<typeof connectedEnvironment>>['admin']) {
+  const users: User[] = []
+  const perPage = 1000
+  for (let page = 1; ; page += 1) {
+    const listed = await admin.auth.admin.listUsers({ page, perPage })
+    if (listed.error) throw listed.error
+    users.push(...listed.data.users)
+    if (listed.data.users.length < perPage) return users
+  }
+}
+
 export async function clearConnectedSessions() {
   const { admin } = await connectedEnvironment()
-  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (listed.error) throw listed.error
-  const ids = listed.data.users.filter(user => accounts.some(account => account.email === user.email)).map(user => user.id)
+  const users = await listAllAuthUsers(admin)
+  const ids = users.filter(user => accounts.some(account => account.email === user.email)).map(user => user.id)
   if (!ids.length) return
   const queues = await admin.from('matchmaking_queue').delete().in('user_id', ids)
   if (queues.error) throw queues.error
@@ -104,9 +115,7 @@ async function deleteTestUser(admin: Awaited<ReturnType<typeof connectedEnvironm
 
 export async function removeConnectedFixtures() {
   const { admin } = await connectedEnvironment()
-  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (listed.error) throw listed.error
-  const users = listed.data.users.filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
+  const users = (await listAllAuthUsers(admin)).filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
   if (users.length) {
     const ids = users.map(user => user.id)
     const spaces = await admin.from('spaces').select('id').in('created_by', ids)
@@ -141,8 +150,6 @@ export async function removeConnectedFixtures() {
 
 export async function assertConnectedFixturesRemoved() {
   const { admin } = await connectedEnvironment()
-  const listed = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (listed.error) throw listed.error
-  const leftovers = listed.data.users.filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
+  const leftovers = (await listAllAuthUsers(admin)).filter(user => Boolean(user.email && fixtureEmails.has(user.email)))
   if (leftovers.length) throw new Error(`연결형 E2E 계정 ${leftovers.length}개가 정리되지 않았습니다.`)
 }
